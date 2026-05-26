@@ -54,3 +54,31 @@ func TestIndexRouteExposesBasicServiceMetadata(t *testing.T) {
 		t.Fatalf("expected listen addr :9090, got %q", payload["listenAddr"])
 	}
 }
+
+func TestCalDAVEndpointHandlesOptions(t *testing.T) {
+	server := NewServer(config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodOptions, "/caldav", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code < http.StatusOK || rec.Code >= http.StatusMultipleChoices {
+		t.Fatalf("expected 2xx status for OPTIONS, got %d", rec.Code)
+	}
+}
+
+func TestWellKnownCalDAVRedirectsToCalDAV(t *testing.T) {
+	server := NewServer(config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/caldav", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected status %d, got %d", http.StatusTemporaryRedirect, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/caldav" {
+		t.Fatalf("expected redirect location /caldav, got %q", location)
+	}
+}

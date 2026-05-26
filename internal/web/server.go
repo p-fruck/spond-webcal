@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"code.p-fruck.eu/spond-webcal/internal/caldav"
 	"code.p-fruck.eu/spond-webcal/internal/config"
 )
 
@@ -16,6 +17,10 @@ func NewServer(cfg config.Config) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+
+	e.Any("/.well-known/caldav", func(c echo.Context) error {
+		return c.Redirect(http.StatusTemporaryRedirect, "/caldav")
+	})
 
 	e.GET("/healthz", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
@@ -30,6 +35,10 @@ func NewServer(cfg config.Config) *Server {
 			"listenAddr": cfg.Addr,
 		})
 	})
+
+	caldavHandler := caldav.NewHandler()
+	e.Any("/caldav", echo.WrapHandler(caldavHandler))
+	e.Any("/caldav/*", echo.WrapHandler(caldavHandler))
 
 	return &Server{e: e}
 }
