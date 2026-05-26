@@ -1,3 +1,5 @@
+/internal/api/client.gen.go
+/spond-webcal
 # Binaries for programs and plugins
 *.exe
 *.exe~
