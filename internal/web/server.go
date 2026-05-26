@@ -25,8 +25,8 @@ func NewServer(cfg config.Config) *Server {
 
 	e.GET("/", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
-			"name":      "spond-webcal",
-			"status":    "starting",
+			"name":       "spond-webcal",
+			"status":     "starting",
 			"listenAddr": cfg.Addr,
 		})
 	})

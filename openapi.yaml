@@ -4,9 +4,9 @@ info:
   description: |
     Unofficial OpenAPI specification for the Spond consumer API.
     Inspired by github.com/Olen/Spond.
-    
+
     Base URL: https://api.spond.com/core/v1/
-    
+
     Authentication: Bearer token obtained via POST /auth2/login
   version: 1.0.0
   license:
