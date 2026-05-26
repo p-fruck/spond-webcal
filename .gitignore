@@ -1,0 +1,61 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Go workspace file (Go 1.18+)
+go.work
+
+# Dependency directories
+vendor/
+
+# Build output
+bin/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# Air (hot reload)
+.air.toml
+
+# Migration artifacts
+migrate.lock
+
+# Generated code (but DO NOT ignore - it's committed)
+# internal/api/client.gen.go is generated but should be committed after generation
+
+# Logs
+*.log
+logs/
