@@ -29,6 +29,35 @@ migrate-up:
 migrate-down:
     go run -tags 'sqlite' ./cmd/migrate down
 
+# Format code
+fmt:
+    go fmt ./...
+    go run golang.org/x/tools/cmd/goimports -w .
+
+# Run go vet
+vet:
+    go vet ./...
+
+# Run linting checks
+lint:
+    @echo "Running golangci-lint..."
+    go run github.com/golangci/golangci-lint/cmd/golangci-lint run ./...
+    @echo "Validating openapi.yaml..."
+    yamllint openapi.yaml
+
+# Run tests
+test:
+    go test -v -cover ./...
+
+# Run tests with coverage report
+test-coverage:
+    go test -v -coverprofile=coverage.out ./...
+    go tool cover -html=coverage.out -o coverage.html
+    @echo "Coverage report generated: coverage.html"
+
+# Full continuous integration checks
+ci: fmt vet lint test
+
 # Clean build artifacts
 clean:
     rm -rf bin/
