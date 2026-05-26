@@ -1,0 +1,704 @@
+openapi: 3.0.0
+info:
+  title: Spond API (Unofficial)
+  description: |
+    Unofficial OpenAPI specification for the Spond consumer API.
+    Inspired by github.com/Olen/Spond.
+    
+    Base URL: https://api.spond.com/core/v1/
+    
+    Authentication: Bearer token obtained via POST /auth2/login
+  version: 1.0.0
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.spond.com/core/v1
+    description: Spond API server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token from /auth2/login
+
+  schemas:
+    AccessToken:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT bearer token
+        expiration:
+          type: string
+          format: date-time
+          description: Token expiration time
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          $ref: '#/components/schemas/AccessToken'
+        refreshToken:
+          $ref: '#/components/schemas/AccessToken'
+        passwordToken:
+          $ref: '#/components/schemas/AccessToken'
+      required:
+        - accessToken
+
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+          description: User's unique ID
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+      required:
+        - id
+        - firstName
+        - lastName
+
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Member's unique ID
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        profile:
+          type: object
+          properties:
+            id:
+              type: string
+              description: Profile ID (may differ from member id for child accounts)
+        guardians:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+      required:
+        - id
+        - firstName
+        - lastName
+
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Group's unique ID
+        name:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        subGroups:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+      required:
+        - id
+        - name
+        - members
+
+    Location:
+      type: object
+      properties:
+        id:
+          type: string
+        feature:
+          type: string
+          description: Location feature (e.g., field name)
+        address:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+
+    EventResponse:
+      type: object
+      properties:
+        acceptedIds:
+          type: array
+          items:
+            type: string
+          description: IDs of members who accepted
+        declinedIds:
+          type: array
+          items:
+            type: string
+          description: IDs of members who declined
+        unansweredIds:
+          type: array
+          items:
+            type: string
+          description: IDs of members who haven't responded
+        waitinglistIds:
+          type: array
+          items:
+            type: string
+        unconfirmedIds:
+          type: array
+          items:
+            type: string
+        declineMessages:
+          type: object
+          additionalProperties:
+            type: string
+          description: Decline reasons keyed by member ID
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Event's unique ID
+        heading:
+          type: string
+          description: Event name/title
+        description:
+          type: string
+        spondType:
+          type: string
+          enum:
+            - EVENT
+        startTimestamp:
+          type: string
+          format: date-time
+          description: Event start time (kickoff)
+        meetupTimestamp:
+          type: string
+          format: date-time
+          description: Meeting/arrival time (optional, for matches)
+        endTimestamp:
+          type: string
+          format: date-time
+          description: Event end time
+        location:
+          $ref: '#/components/schemas/Location'
+        cancelled:
+          type: boolean
+        responses:
+          $ref: '#/components/schemas/EventResponse'
+        updated:
+          type: integer
+          description: Update timestamp (sequence number)
+        groupId:
+          type: string
+        subGroupId:
+          type: string
+        visibility:
+          type: string
+          enum:
+            - INVITEES
+            - PUBLIC
+        participantsHidden:
+          type: boolean
+        commentsDisabled:
+          type: boolean
+        maxAccepted:
+          type: integer
+        autoReminderType:
+          type: string
+        autoAccept:
+          type: boolean
+        rsvpDate:
+          type: string
+          format: date-time
+          description: RSVP deadline
+        payment:
+          type: object
+        attachments:
+          type: array
+          items:
+            type: object
+        owners:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+        tasks:
+          type: object
+          properties:
+            openTasks:
+              type: array
+            assignedTasks:
+              type: array
+      required:
+        - id
+        - heading
+        - startTimestamp
+        - endTimestamp
+
+    EventUpdatePayload:
+      type: object
+      description: Partial event update (only include fields to change)
+      properties:
+        heading:
+          type: string
+        description:
+          type: string
+        startTimestamp:
+          type: string
+          format: date-time
+        endTimestamp:
+          type: string
+          format: date-time
+        location:
+          $ref: '#/components/schemas/Location'
+        visibility:
+          type: string
+          enum:
+            - INVITEES
+            - PUBLIC
+
+    AttendanceChangePayload:
+      type: object
+      description: Request to change event attendance/response
+      properties:
+        accepted:
+          type: string
+          enum:
+            - 'true'
+            - 'false'
+          description: Whether member accepts or declines
+        declineMessage:
+          type: string
+          description: Optional reason for decline
+
+    Post:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - PLAIN
+        groupId:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        comments:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              text:
+                type: string
+
+    ChatMessage:
+      type: object
+      properties:
+        chatId:
+          type: string
+        text:
+          type: string
+        type:
+          type: string
+          enum:
+            - TEXT
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        errorKey:
+          type: string
+        errorCode:
+          type: string
+        message:
+          type: string
+
+paths:
+  /auth2/login:
+    post:
+      tags:
+        - Authentication
+      summary: Authenticate with Spond credentials
+      description: |
+        Exchange email and password for access tokens.
+        No Authorization header required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+              required:
+                - email
+                - password
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials or 2FA required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /profile:
+    get:
+      tags:
+        - User
+      summary: Get authenticated user's profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /groups/:
+    get:
+      tags:
+        - Groups
+      summary: Get all groups and members
+      description: |
+        Retrieve all groups the authenticated user is a member of,
+        including all group members and their details.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of groups with members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sponds/:
+    get:
+      tags:
+        - Events
+      summary: Get events
+      description: |
+        Retrieve events visible to the authenticated user.
+        Supports filtering by group, date range, and visibility.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: groupId
+          in: query
+          description: Filter by group ID
+          schema:
+            type: string
+        - name: subGroupId
+          in: query
+          description: Filter by subgroup ID
+          schema:
+            type: string
+        - name: max
+          in: query
+          description: Maximum number of events to return (default 100)
+          schema:
+            type: integer
+            default: 100
+        - name: scheduled
+          in: query
+          description: Include scheduled events (default false)
+          schema:
+            type: boolean
+            default: false
+        - name: includeHidden
+          in: query
+          description: Include hidden events (only within a group)
+          schema:
+            type: boolean
+            default: false
+        - name: minStartTimestamp
+          in: query
+          description: Only include events starting after this date
+          schema:
+            type: string
+            format: date-time
+        - name: maxStartTimestamp
+          in: query
+          description: Only include events starting before this date
+          schema:
+            type: string
+            format: date-time
+        - name: minEndTimestamp
+          in: query
+          description: Only include events ending after this date
+          schema:
+            type: string
+            format: date-time
+        - name: maxEndTimestamp
+          in: query
+          description: Only include events ending before this date
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sponds/{eventId}:
+    post:
+      tags:
+        - Events
+      summary: Update an event
+      description: |
+        Update an event by merging the provided fields.
+        Only fields in the request are updated; others remain unchanged.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventUpdatePayload'
+      responses:
+        '200':
+          description: Updated event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Event not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sponds/{eventId}/responses/{userId}:
+    put:
+      tags:
+        - Events
+      summary: Update member's event response
+      description: |
+        Change a member's attendance response (accept/decline) for an event.
+        The userId parameter is the member's ID from the group members list.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          description: Member ID (not the authenticated user's ID)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendanceChangePayload'
+      responses:
+        '200':
+          description: Updated responses object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Event or member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /sponds/{eventId}/export:
+    get:
+      tags:
+        - Events
+      summary: Download event attendance report (XLSX)
+      description: |
+        Download an Excel file with attendance information.
+        Returns binary XLSX file.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: XLSX file with attendance data
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthorized
+        '404':
+          description: Event not found
+
+  /posts/:
+    get:
+      tags:
+        - Posts
+      summary: Get posts from group walls
+      description: |
+        Retrieve posts and announcements from group walls.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          description: Post type (typically PLAIN)
+          schema:
+            type: string
+            default: PLAIN
+        - name: groupId
+          in: query
+          description: Filter by group ID
+          schema:
+            type: string
+        - name: max
+          in: query
+          description: Maximum number of posts (default 20)
+          schema:
+            type: integer
+            default: 20
+        - name: includeComments
+          in: query
+          description: Include post comments (default true)
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Post'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /chat:
+    post:
+      tags:
+        - Chat
+      summary: Get chat server credentials
+      description: |
+        Obtain URL and token for the separate chat server.
+        Required before accessing chat endpoints.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Chat server credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    description: Chat server base URL
+                  auth:
+                    type: string
+                    description: Short-lived chat auth token
+        '401':
+          description: Unauthorized
+
+security:
+  - BearerAuth: []
