@@ -160,6 +160,54 @@ func TestFetchProfileReturnsProfileAndSendsBearer(t *testing.T) {
 	}
 }
 
+func TestFetchGroupsRequiresLogin(t *testing.T) {
+	client := NewWithAPIClient(nil)
+
+	_, err := client.FetchGroups(context.Background())
+	if err == nil {
+		t.Fatal("expected fetch groups to fail without authentication")
+	}
+}
+
+func TestFetchGroupsReturnsGroupsAndSendsBearer(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/groups/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team","members":[]}]`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer testServer.Close()
+
+	client, err := New(testServer.URL)
+	if err != nil {
+		t.Fatalf("create spond client: %v", err)
+	}
+
+	if err := client.Login(context.Background(), "me@example.com", "secret"); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	groups, err := client.FetchGroups(context.Background())
+	if err != nil {
+		t.Fatalf("fetch groups: %v", err)
+	}
+
+	if len(groups) != 1 || groups[0].Id != "G1" {
+		t.Fatalf("expected one group G1, got %+v", groups)
+	}
+}
+
 func strPtr(value string) *string {
 	return &value
 }

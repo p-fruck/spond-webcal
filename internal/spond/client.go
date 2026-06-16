@@ -114,6 +114,30 @@ func (c *Client) FetchProfile(ctx context.Context) (api.Profile, error) {
 	return profile, nil
 }
 
+func (c *Client) FetchGroups(ctx context.Context) ([]api.Group, error) {
+	if c.token == "" {
+		return nil, fmt.Errorf("not authenticated")
+	}
+
+	response, err := c.apiClient.GetGroups(ctx, c.bearerRequestEditor())
+	if err != nil {
+		return nil, fmt.Errorf("call groups endpoint: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(response.Body)
+		return nil, fmt.Errorf("fetch groups failed with status %d: %s", response.StatusCode, string(payload))
+	}
+
+	var groups []api.Group
+	if err := json.NewDecoder(response.Body).Decode(&groups); err != nil {
+		return nil, fmt.Errorf("decode groups response: %w", err)
+	}
+
+	return groups, nil
+}
+
 func (c *Client) Token() string {
 	return c.token
 }

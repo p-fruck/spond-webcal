@@ -20,7 +20,70 @@
         <dd>{{.Email}}</dd>
       </div>
     </dl>
+
+    {{if .PastEvents}}
+      <details class="past-events">
+        <summary>Past events ({{len .PastEvents}})</summary>
+        <ul class="event-list">
+          {{range .PastEvents}}
+            <li class="event-item">
+              <div>
+                <strong>{{.Heading}}</strong>
+                <p><time class="event-start" datetime="{{.StartISO}}" data-start="{{.StartISO}}">{{.StartTime}}</time></p>
+              </div>
+              <span class="status {{.StatusCSS}}">{{.Status}}</span>
+            </li>
+          {{end}}
+        </ul>
+      </details>
+    {{end}}
+
+    <section class="events">
+      <h2>Upcoming events</h2>
+      {{if .UpcomingEvents}}
+        <ul class="event-list">
+          {{range .UpcomingEvents}}
+            <li class="event-item">
+              <div>
+                <strong>{{.Heading}}</strong>
+                <p><time class="event-start" datetime="{{.StartISO}}" data-start="{{.StartISO}}">{{.StartTime}}</time></p>
+              </div>
+              <span class="status {{.StatusCSS}}">{{.Status}}</span>
+            </li>
+          {{end}}
+        </ul>
+      {{else}}
+        <p class="empty-events">No upcoming events.</p>
+      {{end}}
+    </section>
+
     <a href="/">Back to sign in</a>
   </main>
+
+  <script>
+    (function () {
+      var items = document.querySelectorAll('.event-start[data-start]');
+      items.forEach(function (el) {
+        var iso = el.getAttribute('data-start');
+        if (!iso) {
+          return;
+        }
+
+        var date = new Date(iso);
+        if (isNaN(date.getTime())) {
+          return;
+        }
+
+        el.textContent = date.toLocaleString(undefined, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

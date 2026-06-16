@@ -164,3 +164,112 @@ h1 {
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
+
+.page-account .events {
+  margin-top: 24px;
+}
+
+.page-account .events h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.page-account .event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.page-account .event-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d5e3db;
+  border-radius: 10px;
+  background: #f8fbf9;
+}
+
+.page-account .event-item strong {
+  display: block;
+  font-size: 0.98rem;
+}
+
+.page-account .event-item p {
+  margin: 2px 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.page-account .status {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.page-account .status.accepted {
+  background: #e8f8ef;
+  color: #12623e;
+  border-color: #b9e3ca;
+}
+
+.page-account .status.declined {
+  background: #fdeceb;
+  color: #9d1f1f;
+  border-color: #f8bfb8;
+}
+
+.page-account .status.waiting {
+  background: #fff7e6;
+  color: #8d5b02;
+  border-color: #f2ddaf;
+}
+
+.page-account .status.unconfirmed {
+  background: #eef4ff;
+  color: #204f9a;
+  border-color: #bfd2f7;
+}
+
+.page-account .status.unanswered,
+.page-account .status.unknown {
+  background: #f0f2f4;
+  color: #4a5965;
+  border-color: #d3dbe2;
+}
+
+.page-account .empty-events {
+  margin: 0;
+  color: var(--muted);
+}
+
+.page-account .past-events {
+  margin-top: 14px;
+  border: 1px dashed #bfd2c7;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #f2f8f4;
+}
+
+.page-account .past-events summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #29523f;
+  font-weight: 600;
+}
+
+.page-account .past-events .event-list {
+  margin-top: 10px;
+}

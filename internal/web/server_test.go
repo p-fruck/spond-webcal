@@ -73,7 +73,33 @@ func TestSigninShowsAccountNameOnSuccess(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":"U1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		case "/sponds/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{
+				"id":"EVT1",
+				"heading":"Training",
+				"startTimestamp":"2099-05-26T18:00:00Z",
+				"endTimestamp":"2099-05-26T19:00:00Z",
+				"responses":{"acceptedIds":["MEMBER1"]}
+			},{
+				"id":"EVT2",
+				"heading":"Match",
+				"startTimestamp":"2000-05-27T18:00:00Z",
+				"endTimestamp":"2000-05-27T19:00:00Z",
+				"responses":{"declinedIds":["MEMBER1"]}
+			}]`))
 		default:
 			t.Fatalf("unexpected API path: %s", r.URL.Path)
 		}
@@ -102,6 +128,26 @@ func TestSigninShowsAccountNameOnSuccess(t *testing.T) {
 
 	if !strings.Contains(body, "Ada Lovelace") {
 		t.Fatalf("expected account name in response, got %q", body)
+	}
+
+	if !strings.Contains(body, "Training") || !strings.Contains(body, "Accepted") {
+		t.Fatalf("expected accepted event in response, got %q", body)
+	}
+
+	if !strings.Contains(body, "Match") || !strings.Contains(body, "Declined") {
+		t.Fatalf("expected declined event in response, got %q", body)
+	}
+
+	if !strings.Contains(body, "Past events (1)") {
+		t.Fatalf("expected past events disclosure, got %q", body)
+	}
+
+	if strings.Index(body, "Past events (1)") > strings.Index(body, "Upcoming events") {
+		t.Fatalf("expected past events disclosure above upcoming events, got %q", body)
+	}
+
+	if !strings.Contains(body, "class=\"event-start\"") || !strings.Contains(body, "data-start=") {
+		t.Fatalf("expected local-time conversion markup in response, got %q", body)
 	}
 }
 

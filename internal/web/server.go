@@ -1,11 +1,11 @@
 package web
 
 import (
-	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -71,19 +71,31 @@ func NewServer(cfg config.Config, caldavHandler http.Handler) *Server {
 			return c.Redirect(http.StatusSeeOther, "/?error=profile")
 		}
 
-		fullName := strings.TrimSpace(fmt.Sprintf("%s %s", profile.FirstName, profile.LastName))
-		if fullName == "" {
-			fullName = email
+		groups, err := client.FetchGroups(c.Request().Context())
+		if err != nil {
+			groups = nil
 		}
+
+		events, err := client.FetchEvents(c.Request().Context(), 100)
+		if err != nil {
+			events = nil
+		}
+
+		fullName := fullNameFromProfile(profile.FirstName, profile.LastName, email)
 
 		profileEmail := email
 		if profile.Email != nil {
 			profileEmail = string(*profile.Email)
 		}
 
-		data := map[string]string{
-			"Name":  fullName,
-			"Email": profileEmail,
+		actorIDs := responseActorIDs(profile, profileEmail, groups)
+		upcomingEvents, pastEvents := buildEventViewData(events, actorIDs, time.Now().UTC())
+
+		data := accountPageData{
+			Name:           fullName,
+			Email:          profileEmail,
+			UpcomingEvents: upcomingEvents,
+			PastEvents:     pastEvents,
 		}
 
 		c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
