@@ -6,11 +6,23 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"code.p-fruck.eu/spond-webcal/internal/caldav"
 	"code.p-fruck.eu/spond-webcal/internal/config"
 )
 
+func newTestServer(t *testing.T, cfg config.Config) *Server {
+	t.Helper()
+
+	h, err := caldav.NewHandler(caldav.NewMemoryResourceStore(), "test")
+	if err != nil {
+		t.Fatalf("new caldav handler: %v", err)
+	}
+
+	return NewServer(cfg, h)
+}
+
 func TestHealthzRouteReturnsOK(t *testing.T) {
-	server := NewServer(config.Config{Addr: ":8080"})
+	server := newTestServer(t, config.Config{Addr: ":8080"})
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
@@ -31,7 +43,7 @@ func TestHealthzRouteReturnsOK(t *testing.T) {
 }
 
 func TestIndexRouteExposesBasicServiceMetadata(t *testing.T) {
-	server := NewServer(config.Config{Addr: ":9090"})
+	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -56,7 +68,7 @@ func TestIndexRouteExposesBasicServiceMetadata(t *testing.T) {
 }
 
 func TestCalDAVEndpointHandlesOptions(t *testing.T) {
-	server := NewServer(config.Config{Addr: ":9090"})
+	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodOptions, "/caldav", nil)
 	rec := httptest.NewRecorder()
 
@@ -68,7 +80,7 @@ func TestCalDAVEndpointHandlesOptions(t *testing.T) {
 }
 
 func TestWellKnownCalDAVRedirectsToCalDAV(t *testing.T) {
-	server := NewServer(config.Config{Addr: ":9090"})
+	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/caldav", nil)
 	rec := httptest.NewRecorder()
 

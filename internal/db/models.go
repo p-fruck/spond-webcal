@@ -47,3 +47,12 @@ type EventResponse struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+
+type CalDAVResource struct {
+	ID           uint   `gorm:"primaryKey"`
+	UserKey      string `gorm:"index:idx_caldav_user_path,priority:1;size:128;not null"`
+	ResourcePath string `gorm:"index:idx_caldav_user_path,priority:2;size:512;not null"`
+	Content      []byte
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}

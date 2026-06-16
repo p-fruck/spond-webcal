@@ -5,7 +5,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"code.p-fruck.eu/spond-webcal/internal/caldav"
 	"code.p-fruck.eu/spond-webcal/internal/config"
 )
 
@@ -13,7 +12,7 @@ type Server struct {
 	e *echo.Echo
 }
 
-func NewServer(cfg config.Config) *Server {
+func NewServer(cfg config.Config, caldavHandler http.Handler) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
@@ -36,7 +35,6 @@ func NewServer(cfg config.Config) *Server {
 		})
 	})
 
-	caldavHandler := caldav.NewHandler()
 	e.Any("/caldav", echo.WrapHandler(caldavHandler))
 	e.Any("/caldav/*", echo.WrapHandler(caldavHandler))
 

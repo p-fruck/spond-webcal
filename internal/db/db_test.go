@@ -49,4 +49,8 @@ func TestOpenAndMigrateSQLiteInMemory(t *testing.T) {
 	if !database.Migrator().HasTable(&EventResponse{}) {
 		t.Fatal("expected event_responses table to exist after migration")
 	}
+
+	if !database.Migrator().HasTable(&CalDAVResource{}) {
+		t.Fatal("expected caldav_resources table to exist after migration")
+	}
 }

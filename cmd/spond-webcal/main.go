@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"code.p-fruck.eu/spond-webcal/internal/caldav"
 	"code.p-fruck.eu/spond-webcal/internal/config"
 	"code.p-fruck.eu/spond-webcal/internal/db"
 	"code.p-fruck.eu/spond-webcal/internal/web"
@@ -24,7 +25,13 @@ func main() {
 		_ = sqlDB.Close()
 	}()
 
-	server := web.NewServer(cfg)
+	caldavStore := db.NewCalDAVStore(database)
+	caldavHandler, err := caldav.NewHandler(caldavStore, "default")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	server := web.NewServer(cfg, caldavHandler)
 
 	if err := server.Start(cfg.Addr); err != nil {
 		log.Fatal(err)
