@@ -79,6 +79,18 @@ func TestCalDAVEndpointHandlesOptions(t *testing.T) {
 	}
 }
 
+func TestUserScopedCalDAVEndpointHandlesOptions(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodOptions, "/caldav/alice", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code < http.StatusOK || rec.Code >= http.StatusMultipleChoices {
+		t.Fatalf("expected 2xx status for user-scoped OPTIONS, got %d", rec.Code)
+	}
+}
+
 func TestWellKnownCalDAVRedirectsToCalDAV(t *testing.T) {
 	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/caldav", nil)
