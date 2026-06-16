@@ -1,9 +1,11 @@
 package web
 
 import (
-	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"code.p-fruck.eu/spond-webcal/internal/caldav"
@@ -32,17 +34,12 @@ func TestHealthzRouteReturnsOK(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var payload map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-
-	if payload["status"] != "ok" {
-		t.Fatalf("expected health status ok, got %q", payload["status"])
+	if !strings.Contains(rec.Body.String(), "\"status\":\"ok\"") {
+		t.Fatalf("expected health response to contain ok status, got %q", rec.Body.String())
 	}
 }
 
-func TestIndexRouteExposesBasicServiceMetadata(t *testing.T) {
+func TestIndexRouteRendersSigninPage(t *testing.T) {
 	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -53,17 +50,104 @@ func TestIndexRouteExposesBasicServiceMetadata(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var payload map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	body := rec.Body.String()
+	if !strings.Contains(body, "Sign in with Spond") {
+		t.Fatalf("expected sign-in page heading, got %q", body)
 	}
 
-	if payload["name"] != "spond-webcal" {
-		t.Fatalf("expected service name spond-webcal, got %q", payload["name"])
+	if !strings.Contains(body, "action=\"/signin\"") {
+		t.Fatalf("expected sign-in form action, got %q", body)
+	}
+}
+
+func TestSigninShowsAccountNameOnSuccess(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"U1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	form := url.Values{}
+	form.Set("email", "ada@example.com")
+	form.Set("password", "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/signin", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	if payload["listenAddr"] != ":9090" {
-		t.Fatalf("expected listen addr :9090, got %q", payload["listenAddr"])
+	body := rec.Body.String()
+	if !strings.Contains(body, "Signed in successfully") {
+		t.Fatalf("expected account page title, got %q", body)
+	}
+
+	if !strings.Contains(body, "Ada Lovelace") {
+		t.Fatalf("expected account name in response, got %q", body)
+	}
+}
+
+func TestSigninRedirectsToIndexOnLoginFailure(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth2/login" {
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	form := url.Values{}
+	form.Set("email", "ada@example.com")
+	form.Set("password", "wrong")
+
+	req := httptest.NewRequest(http.MethodPost, "/signin", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/?error=login" {
+		t.Fatalf("expected redirect to /?error=login, got %q", location)
+	}
+}
+
+func TestSigninMissingFormFieldsRedirects(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodPost, "/signin", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/?error=missing" {
+		t.Fatalf("expected redirect to /?error=missing, got %q", location)
 	}
 }
 
@@ -104,5 +188,43 @@ func TestWellKnownCalDAVRedirectsToCalDAV(t *testing.T) {
 
 	if location := rec.Header().Get("Location"); location != "/caldav" {
 		t.Fatalf("expected redirect location /caldav, got %q", location)
+	}
+}
+
+func TestIndexRouteShowsErrorMessageWhenRequested(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/?error=login", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body, err := io.ReadAll(rec.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+
+	if !strings.Contains(string(body), "Login failed") {
+		t.Fatalf("expected login error message, got %q", string(body))
+	}
+}
+
+func TestStaticCSSIsServed(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/static/app.css", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, ".page-signin") {
+		t.Fatalf("expected css body to contain page-signin rules, got %q", body)
 	}
 }

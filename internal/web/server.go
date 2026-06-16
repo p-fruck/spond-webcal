@@ -1,25 +1,35 @@
 package web
 
 import (
+	"fmt"
+	"html/template"
+	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
 	"code.p-fruck.eu/spond-webcal/internal/config"
+	"code.p-fruck.eu/spond-webcal/internal/spond"
 )
 
 type Server struct {
-	e *echo.Echo
+	e         *echo.Echo
+	templates *template.Template
 }
 
 func NewServer(cfg config.Config, caldavHandler http.Handler) *Server {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	templates := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
+	staticSubFS := mustSubFS(staticFS, "static")
 
 	e.Any("/.well-known/caldav", func(c echo.Context) error {
 		return c.Redirect(http.StatusTemporaryRedirect, "/caldav")
 	})
+
+	e.GET("/static/*", echo.WrapHandler(http.StripPrefix("/static/", http.FileServer(http.FS(staticSubFS)))))
 
 	e.GET("/healthz", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
@@ -28,17 +38,62 @@ func NewServer(cfg config.Config, caldavHandler http.Handler) *Server {
 	})
 
 	e.GET("/", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{
-			"name":       "spond-webcal",
-			"status":     "starting",
-			"listenAddr": cfg.Addr,
-		})
+		c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
+		data := map[string]string{
+			"Error": "",
+		}
+
+		if c.QueryParam("error") != "" {
+			data["Error"] = "Login failed. Please check your credentials and try again."
+		}
+
+		return templates.ExecuteTemplate(c.Response(), "signin.html", data)
+	})
+
+	e.POST("/signin", func(c echo.Context) error {
+		email := strings.TrimSpace(c.FormValue("email"))
+		password := c.FormValue("password")
+		if email == "" || password == "" {
+			return c.Redirect(http.StatusSeeOther, "/?error=missing")
+		}
+
+		client, err := spond.New(cfg.SpondBaseURL)
+		if err != nil {
+			return c.String(http.StatusInternalServerError, "failed to initialize spond client")
+		}
+
+		if err := client.Login(c.Request().Context(), email, password); err != nil {
+			return c.Redirect(http.StatusSeeOther, "/?error=login")
+		}
+
+		profile, err := client.FetchProfile(c.Request().Context())
+		if err != nil {
+			return c.Redirect(http.StatusSeeOther, "/?error=profile")
+		}
+
+		fullName := strings.TrimSpace(fmt.Sprintf("%s %s", profile.FirstName, profile.LastName))
+		if fullName == "" {
+			fullName = email
+		}
+
+		profileEmail := email
+		if profile.Email != nil {
+			profileEmail = string(*profile.Email)
+		}
+
+		data := map[string]string{
+			"Name":  fullName,
+			"Email": profileEmail,
+		}
+
+		c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
+		return templates.ExecuteTemplate(c.Response(), "account.html", data)
 	})
 
 	e.Any("/caldav", echo.WrapHandler(caldavHandler))
 	e.Any("/caldav/*", echo.WrapHandler(caldavHandler))
 
-	return &Server{e: e}
+	return &Server{e: e, templates: templates}
 }
 
 func (s *Server) Echo() *echo.Echo {
@@ -47,4 +102,13 @@ func (s *Server) Echo() *echo.Echo {
 
 func (s *Server) Start(addr string) error {
 	return s.e.Start(addr)
+}
+
+func mustSubFS(fsys fs.FS, dir string) fs.FS {
+	sub, err := fs.Sub(fsys, dir)
+	if err != nil {
+		panic(err)
+	}
+
+	return sub
 }

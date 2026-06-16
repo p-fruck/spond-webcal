@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Spond WebCAL - Sign in</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-signin">
+  <main class="card">
+    <h1>Sign in with Spond</h1>
+    <p>Use your Spond credentials to verify API access and preview your account details.</p>
+
+    {{if .Error}}
+      <div class="error">{{.Error}}</div>
+    {{end}}
+
+    <form method="post" action="/signin">
+      <label>
+        Email
+        <input type="email" name="email" autocomplete="email" required>
+      </label>
+
+      <label>
+        Password
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

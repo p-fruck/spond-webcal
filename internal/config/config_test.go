@@ -7,6 +7,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("SPOND_WEBCAL_DB_URL", "")
 	t.Setenv("SPOND_WEBCAL_COOKIE_SECRET", "")
 	t.Setenv("SPOND_WEBCAL_LOG_LEVEL", "")
+	t.Setenv("SPOND_WEBCAL_SPOND_BASE_URL", "")
 
 	config := Load()
 
@@ -25,6 +26,10 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.LogLevel != defaultLogLevel {
 		t.Fatalf("expected default log level %q, got %q", defaultLogLevel, config.LogLevel)
 	}
+
+	if config.SpondBaseURL != defaultSpondBaseURL {
+		t.Fatalf("expected default spond base url %q, got %q", defaultSpondBaseURL, config.SpondBaseURL)
+	}
 }
 
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
@@ -32,6 +37,7 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("SPOND_WEBCAL_DB_URL", "postgres://example")
 	t.Setenv("SPOND_WEBCAL_COOKIE_SECRET", "secret")
 	t.Setenv("SPOND_WEBCAL_LOG_LEVEL", "info")
+	t.Setenv("SPOND_WEBCAL_SPOND_BASE_URL", "http://localhost:9999")
 
 	config := Load()
 
@@ -49,5 +55,9 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 
 	if config.LogLevel != "info" {
 		t.Fatalf("expected overridden log level, got %q", config.LogLevel)
+	}
+
+	if config.SpondBaseURL != "http://localhost:9999" {
+		t.Fatalf("expected overridden spond base url, got %q", config.SpondBaseURL)
 	}
 }

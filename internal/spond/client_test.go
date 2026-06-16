@@ -111,6 +111,55 @@ func TestLoginReturnsErrorOnUnauthorized(t *testing.T) {
 	}
 }
 
+func TestFetchProfileRequiresLogin(t *testing.T) {
+	client := NewWithAPIClient(nil)
+
+	_, err := client.FetchProfile(context.Background())
+	if err == nil {
+		t.Fatal("expected fetch profile to fail without authentication")
+	}
+}
+
+func TestFetchProfileReturnsProfileAndSendsBearer(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"U1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer testServer.Close()
+
+	client, err := New(testServer.URL)
+	if err != nil {
+		t.Fatalf("create spond client: %v", err)
+	}
+
+	if err := client.Login(context.Background(), "me@example.com", "secret"); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	profile, err := client.FetchProfile(context.Background())
+	if err != nil {
+		t.Fatalf("fetch profile: %v", err)
+	}
+
+	if profile.FirstName != "Ada" || profile.LastName != "Lovelace" {
+		t.Fatalf("expected Ada Lovelace, got %q %q", profile.FirstName, profile.LastName)
+	}
+}
+
 func strPtr(value string) *string {
 	return &value
 }

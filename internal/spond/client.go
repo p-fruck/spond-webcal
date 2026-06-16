@@ -90,6 +90,30 @@ func (c *Client) FetchEvents(ctx context.Context, maxEvents int) ([]api.Event, e
 	return events, nil
 }
 
+func (c *Client) FetchProfile(ctx context.Context) (api.Profile, error) {
+	if c.token == "" {
+		return api.Profile{}, fmt.Errorf("not authenticated")
+	}
+
+	response, err := c.apiClient.GetProfile(ctx, c.bearerRequestEditor())
+	if err != nil {
+		return api.Profile{}, fmt.Errorf("call profile endpoint: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(response.Body)
+		return api.Profile{}, fmt.Errorf("fetch profile failed with status %d: %s", response.StatusCode, string(payload))
+	}
+
+	var profile api.Profile
+	if err := json.NewDecoder(response.Body).Decode(&profile); err != nil {
+		return api.Profile{}, fmt.Errorf("decode profile response: %w", err)
+	}
+
+	return profile, nil
+}
+
 func (c *Client) Token() string {
 	return c.token
 }

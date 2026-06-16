@@ -1,0 +1,166 @@
+:root {
+  --font-ui: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --radius-lg: 14px;
+  --text-size-title: clamp(1.5rem, 3vw, 2rem);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  font-family: var(--font-ui);
+}
+
+.card {
+  width: min(560px, 100%);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: var(--text-size-title);
+  letter-spacing: 0.01em;
+}
+
+.page-signin {
+  --bg: #f4efe6;
+  --panel: #fffaf2;
+  --ink: #1f2430;
+  --muted: #5d6473;
+  --accent: #0b6e4f;
+  --accent-2: #1d936c;
+  --danger: #b42318;
+
+  background:
+    radial-gradient(circle at 10% 10%, #efe4d2 0, transparent 35%),
+    radial-gradient(circle at 90% 80%, #dcebdd 0, transparent 40%),
+    var(--bg);
+  color: var(--ink);
+}
+
+.page-signin .card {
+  background: var(--panel);
+  border: 1px solid #e8dbc5;
+  box-shadow: 0 22px 40px rgba(31, 36, 48, 0.12);
+}
+
+.page-signin p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.page-signin form {
+  margin-top: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.page-signin label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.page-signin input {
+  width: 100%;
+  border: 1px solid #cfc2ad;
+  background: #fff;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font: inherit;
+}
+
+.page-signin input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, white);
+  border-color: var(--accent);
+}
+
+.page-signin button {
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  padding: 11px 16px;
+  cursor: pointer;
+}
+
+.page-signin .error {
+  margin-top: 14px;
+  color: var(--danger);
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.page-account {
+  --bg: #e9f2ec;
+  --card: #ffffff;
+  --ink: #142019;
+  --muted: #50605a;
+  --accent: #146c43;
+
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 10%, #d8eadf 0, transparent 33%),
+    radial-gradient(circle at 95% 80%, #f0f8f2 0, transparent 45%),
+    var(--bg);
+}
+
+.page-account .card {
+  background: var(--card);
+  border: 1px solid #cde0d5;
+  box-shadow: 0 20px 38px rgba(20, 32, 25, 0.12);
+}
+
+.page-account .pill {
+  display: inline-block;
+  background: #ebf7ef;
+  border: 1px solid #bee3cc;
+  color: var(--accent);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.page-account dl {
+  margin: 18px 0 0;
+  display: grid;
+  gap: 14px;
+}
+
+.page-account dt {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.page-account dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.page-account a {
+  margin-top: 18px;
+  display: inline-block;
+  color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
