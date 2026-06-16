@@ -29,6 +29,26 @@ func (s *MemoryResourceStore) ListResources(_ context.Context, userKey string) (
 	return resources, nil
 }
 
+func (s *MemoryResourceStore) GetResource(_ context.Context, userKey, resourcePath string) (Resource, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	userData, ok := s.data[userKey]
+	if !ok {
+		return Resource{}, false, nil
+	}
+
+	content, ok := userData[resourcePath]
+	if !ok {
+		return Resource{}, false, nil
+	}
+
+	copied := make([]byte, len(content))
+	copy(copied, content)
+
+	return Resource{Path: resourcePath, Content: copied}, true, nil
+}
+
 func (s *MemoryResourceStore) PutResource(_ context.Context, userKey, resourcePath string, content []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

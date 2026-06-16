@@ -89,6 +89,22 @@ func (s *CalDAVStore) ListResources(ctx context.Context, userKey string) ([]cald
 	return resources, nil
 }
 
+func (s *CalDAVStore) GetResource(ctx context.Context, userKey, resourcePath string) (caldav.Resource, bool, error) {
+	var row CalDAVResource
+	err := s.database.WithContext(ctx).
+		Where("user_key = ? AND resource_path = ?", userKey, resourcePath).
+		First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return caldav.Resource{}, false, nil
+		}
+
+		return caldav.Resource{}, false, fmt.Errorf("query caldav resource: %w", err)
+	}
+
+	return caldav.Resource{Path: row.ResourcePath, Content: row.Content}, true, nil
+}
+
 func (s *CalDAVStore) PutResource(ctx context.Context, userKey, resourcePath string, content []byte) error {
 	var row CalDAVResource
 	err := s.database.WithContext(ctx).

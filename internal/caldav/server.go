@@ -3,6 +3,7 @@ package caldav
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ type Resource struct {
 
 type ResourceStore interface {
 	ListResources(ctx context.Context, userKey string) ([]Resource, error)
+	GetResource(ctx context.Context, userKey, resourcePath string) (Resource, bool, error)
 	PutResource(ctx context.Context, userKey, resourcePath string, content []byte) error
 	DeleteResource(ctx context.Context, userKey, resourcePath string) error
 }
@@ -105,14 +107,43 @@ func (h *persistingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	currentResource, found, lookupErr := h.store.GetResource(rewritten.Context(), userKey, resourcePath)
+	if lookupErr != nil {
+		http.Error(w, "failed to lookup caldav resource", http.StatusInternalServerError)
+		return
+	}
+
+	if rewritten.Method == http.MethodGet || rewritten.Method == http.MethodHead {
+		if found {
+			w.Header().Set("ETag", resourceETag(currentResource.Content))
+		}
+	}
+
+	ifMatch := rewritten.Header.Get("If-Match")
+	if ifMatch != "" && (rewritten.Method == http.MethodPut || rewritten.Method == http.MethodDelete) {
+		if !ifMatchSatisfied(ifMatch, found, currentResource.Content) {
+			http.Error(w, "precondition failed", http.StatusPreconditionFailed)
+			return
+		}
+	}
+
 	var requestBody []byte
+	responseETag := ""
+	if found && (rewritten.Method == http.MethodGet || rewritten.Method == http.MethodHead) {
+		responseETag = resourceETag(currentResource.Content)
+	}
+
 	if rewritten.Method == http.MethodPut {
 		requestBody, _ = io.ReadAll(rewritten.Body)
 		rewritten.Body = io.NopCloser(bytes.NewReader(requestBody))
+		responseETag = resourceETag(requestBody)
 	}
 
-	recorder := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+	recorder := &statusRecorder{ResponseWriter: w, etagOverride: responseETag}
 	userHandler.ServeHTTP(recorder, rewritten)
+	if recorder.statusCode == 0 {
+		recorder.statusCode = http.StatusOK
+	}
 
 	if recorder.statusCode < http.StatusOK || recorder.statusCode >= http.StatusMultipleChoices {
 		return
@@ -126,14 +157,53 @@ func (h *persistingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func resourceETag(content []byte) string {
+	sum := sha256.Sum256(content)
+	return fmt.Sprintf("\"%x\"", sum)
+}
+
+func ifMatchSatisfied(ifMatch string, found bool, content []byte) bool {
+	if ifMatch == "*" {
+		return found
+	}
+
+	if !found {
+		return false
+	}
+
+	current := resourceETag(content)
+	for _, part := range strings.Split(ifMatch, ",") {
+		candidate := strings.TrimSpace(part)
+		if candidate == current {
+			return true
+		}
+	}
+
+	return false
+}
+
 type statusRecorder struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode   int
+	wroteHeader  bool
+	etagOverride string
 }
 
 func (r *statusRecorder) WriteHeader(statusCode int) {
+	if r.etagOverride != "" {
+		r.ResponseWriter.Header().Set("ETag", r.etagOverride)
+	}
 	r.statusCode = statusCode
+	r.wroteHeader = true
 	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+
+	return r.ResponseWriter.Write(p)
 }
 
 func normalizeResourcePath(requestPath, defaultUserKey string) (string, string) {

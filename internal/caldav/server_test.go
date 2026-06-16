@@ -186,3 +186,108 @@ func TestNewHandlerSupportsLegacyDefaultUserPath(t *testing.T) {
 		t.Fatalf("unexpected body, got %q", string(body))
 	}
 }
+
+func TestGetReturnsETagHeader(t *testing.T) {
+	handler, err := NewHandler(NewMemoryResourceStore(), "default")
+	if err != nil {
+		t.Fatalf("new handler: %v", err)
+	}
+
+	payload := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
+	putReq := httptest.NewRequest(http.MethodPut, "/caldav/default.ics", strings.NewReader(payload))
+	putRec := httptest.NewRecorder()
+	handler.ServeHTTP(putRec, putReq)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/caldav/default.ics", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected GET status 200, got %d", getRec.Code)
+	}
+
+	gotETag := getRec.Header().Get("ETag")
+	wantETag := resourceETag([]byte(payload))
+	if gotETag != wantETag {
+		t.Fatalf("expected ETag %q, got %q", wantETag, gotETag)
+	}
+}
+
+func TestPutWithIfMatchRejectsStaleTag(t *testing.T) {
+	handler, err := NewHandler(NewMemoryResourceStore(), "default")
+	if err != nil {
+		t.Fatalf("new handler: %v", err)
+	}
+
+	initialPayload := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-VERSION:1\r\nEND:VCALENDAR\r\n"
+	putInitial := httptest.NewRequest(http.MethodPut, "/caldav/default.ics", strings.NewReader(initialPayload))
+	putInitialRec := httptest.NewRecorder()
+	handler.ServeHTTP(putInitialRec, putInitial)
+
+	updatedPayload := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-VERSION:2\r\nEND:VCALENDAR\r\n"
+	putStale := httptest.NewRequest(http.MethodPut, "/caldav/default.ics", strings.NewReader(updatedPayload))
+	putStale.Header.Set("If-Match", "\"stale\"")
+	putStaleRec := httptest.NewRecorder()
+	handler.ServeHTTP(putStaleRec, putStale)
+
+	if putStaleRec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("expected status %d, got %d", http.StatusPreconditionFailed, putStaleRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/caldav/default.ics", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	body, readErr := io.ReadAll(getRec.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+
+	if string(body) != initialPayload {
+		t.Fatalf("expected original payload to remain, got %q", string(body))
+	}
+}
+
+func TestPutWithIfMatchAcceptsCurrentTag(t *testing.T) {
+	handler, err := NewHandler(NewMemoryResourceStore(), "default")
+	if err != nil {
+		t.Fatalf("new handler: %v", err)
+	}
+
+	initialPayload := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-VERSION:1\r\nEND:VCALENDAR\r\n"
+	putInitial := httptest.NewRequest(http.MethodPut, "/caldav/default.ics", strings.NewReader(initialPayload))
+	putInitialRec := httptest.NewRecorder()
+	handler.ServeHTTP(putInitialRec, putInitial)
+
+	if putInitialRec.Code != http.StatusCreated && putInitialRec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 201/204, got %d", putInitialRec.Code)
+	}
+
+	currentETag := putInitialRec.Header().Get("ETag")
+	if currentETag == "" {
+		t.Fatal("expected ETag header on initial PUT")
+	}
+
+	updatedPayload := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-VERSION:2\r\nEND:VCALENDAR\r\n"
+	putCurrent := httptest.NewRequest(http.MethodPut, "/caldav/default.ics", strings.NewReader(updatedPayload))
+	putCurrent.Header.Set("If-Match", currentETag)
+	putCurrentRec := httptest.NewRecorder()
+	handler.ServeHTTP(putCurrentRec, putCurrent)
+
+	if putCurrentRec.Code != http.StatusCreated && putCurrentRec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 201/204, got %d", putCurrentRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/caldav/default.ics", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	body, readErr := io.ReadAll(getRec.Body)
+	if readErr != nil {
+		t.Fatalf("read body: %v", readErr)
+	}
+
+	if string(body) != updatedPayload {
+		t.Fatalf("expected updated payload, got %q", string(body))
+	}
+}
