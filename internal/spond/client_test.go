@@ -93,6 +93,60 @@ func TestFetchEventsReturnsEventsAndSendsBearer(t *testing.T) {
 	}
 }
 
+func TestFetchEventsForGroupsUsesGroupQueryAndDeduplicates(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/sponds/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+
+			groupID := r.URL.Query().Get("groupId")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			switch groupID {
+			case "G1":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"From G1","startTimestamp":"2026-05-26T18:00:00Z","endTimestamp":"2026-05-26T19:00:00Z"},
+					{"id":"EVT-SHARED","heading":"Shared","startTimestamp":"2026-05-27T18:00:00Z","endTimestamp":"2026-05-27T19:00:00Z"}
+				]`))
+			case "G2":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT2","heading":"From G2","startTimestamp":"2026-05-28T18:00:00Z","endTimestamp":"2026-05-28T19:00:00Z"},
+					{"id":"EVT-SHARED","heading":"Shared","startTimestamp":"2026-05-27T18:00:00Z","endTimestamp":"2026-05-27T19:00:00Z"}
+				]`))
+			default:
+				t.Fatalf("unexpected groupId query: %q", groupID)
+			}
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer testServer.Close()
+
+	client, err := New(testServer.URL)
+	if err != nil {
+		t.Fatalf("create spond client: %v", err)
+	}
+
+	if err := client.Login(context.Background(), "me@example.com", "secret"); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	events, err := client.FetchEventsForGroups(context.Background(), 100, []string{"G1", "G2"})
+	if err != nil {
+		t.Fatalf("fetch grouped events: %v", err)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("expected 3 deduplicated events, got %d", len(events))
+	}
+}
+
 func TestLoginReturnsErrorOnUnauthorized(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

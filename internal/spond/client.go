@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -71,6 +72,55 @@ func (c *Client) FetchEvents(ctx context.Context, maxEvents int) ([]api.Event, e
 		Scheduled: &scheduled,
 	}
 
+	return c.fetchEventsWithParams(ctx, params)
+}
+
+func (c *Client) FetchEventsForGroups(ctx context.Context, maxEvents int, groupIDs []string) ([]api.Event, error) {
+	if c.token == "" {
+		return nil, fmt.Errorf("not authenticated")
+	}
+
+	normalizedGroupIDs := normalizeGroupIDs(groupIDs)
+	if len(normalizedGroupIDs) == 0 {
+		return c.FetchEvents(ctx, maxEvents)
+	}
+
+	combined := make([]api.Event, 0, len(normalizedGroupIDs)*8)
+	seenByID := map[string]struct{}{}
+
+	for _, groupID := range normalizedGroupIDs {
+		scheduled := false
+		currentGroupID := groupID
+		params := &api.GetSpondsParams{
+			Max:       &maxEvents,
+			Scheduled: &scheduled,
+			GroupId:   &currentGroupID,
+		}
+
+		events, err := c.fetchEventsWithParams(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, event := range events {
+			if strings.TrimSpace(event.Id) == "" {
+				combined = append(combined, event)
+				continue
+			}
+
+			if _, exists := seenByID[event.Id]; exists {
+				continue
+			}
+
+			seenByID[event.Id] = struct{}{}
+			combined = append(combined, event)
+		}
+	}
+
+	return combined, nil
+}
+
+func (c *Client) fetchEventsWithParams(ctx context.Context, params *api.GetSpondsParams) ([]api.Event, error) {
 	response, err := c.apiClient.GetSponds(ctx, params, c.bearerRequestEditor())
 	if err != nil {
 		return nil, fmt.Errorf("call events endpoint: %w", err)
@@ -88,6 +138,27 @@ func (c *Client) FetchEvents(ctx context.Context, maxEvents int) ([]api.Event, e
 	}
 
 	return events, nil
+}
+
+func normalizeGroupIDs(groupIDs []string) []string {
+	seen := map[string]struct{}{}
+	items := make([]string, 0, len(groupIDs))
+
+	for _, groupID := range groupIDs {
+		trimmed := strings.TrimSpace(groupID)
+		if trimmed == "" {
+			continue
+		}
+
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+
+		seen[trimmed] = struct{}{}
+		items = append(items, trimmed)
+	}
+
+	return items
 }
 
 func (c *Client) FetchProfile(ctx context.Context) (api.Profile, error) {

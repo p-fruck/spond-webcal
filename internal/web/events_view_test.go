@@ -90,10 +90,14 @@ func TestResponseStatusForProfile(t *testing.T) {
 func TestBuildEventViewDataSplitsAndSorts(t *testing.T) {
 	accepted := []string{"U1"}
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	groupNames := map[string]string{"G1": "Team A"}
+	subGroupParent := map[string]string{}
+	groupID := "G1"
 
 	events := []api.Event{
 		{
 			Heading:        "Older past event",
+			GroupId:        &groupID,
 			StartTimestamp: time.Date(2026, 6, 1, 18, 0, 0, 0, time.UTC),
 			Responses: &api.EventResponse{
 				AcceptedIds: &accepted,
@@ -101,6 +105,7 @@ func TestBuildEventViewDataSplitsAndSorts(t *testing.T) {
 		},
 		{
 			Heading:        "Recent past event",
+			GroupId:        &groupID,
 			StartTimestamp: time.Date(2026, 6, 15, 18, 0, 0, 0, time.UTC),
 			Responses: &api.EventResponse{
 				AcceptedIds: &accepted,
@@ -108,6 +113,7 @@ func TestBuildEventViewDataSplitsAndSorts(t *testing.T) {
 		},
 		{
 			Heading:        "Later upcoming",
+			GroupId:        &groupID,
 			StartTimestamp: time.Date(2026, 6, 22, 18, 0, 0, 0, time.UTC),
 			Responses: &api.EventResponse{
 				AcceptedIds: &accepted,
@@ -115,6 +121,7 @@ func TestBuildEventViewDataSplitsAndSorts(t *testing.T) {
 		},
 		{
 			Heading:        "Soon upcoming",
+			GroupId:        &groupID,
 			StartTimestamp: time.Date(2026, 6, 17, 18, 0, 0, 0, time.UTC),
 			Responses: &api.EventResponse{
 				AcceptedIds: &accepted,
@@ -122,7 +129,7 @@ func TestBuildEventViewDataSplitsAndSorts(t *testing.T) {
 		},
 	}
 
-	upcoming, past := buildEventViewData(events, []string{"U1"}, now)
+	upcoming, past := buildEventViewData(events, []string{"U1"}, groupNames, subGroupParent, now)
 	if len(upcoming) != 2 {
 		t.Fatalf("expected 2 upcoming items, got %d", len(upcoming))
 	}
@@ -149,6 +156,86 @@ func TestBuildEventViewDataSplitsAndSorts(t *testing.T) {
 
 	if upcoming[0].StartISO == "" {
 		t.Fatal("expected start ISO timestamp")
+	}
+
+	if upcoming[0].GroupName != "Team A" {
+		t.Fatalf("expected group name Team A, got %q", upcoming[0].GroupName)
+	}
+}
+
+func TestBuildEventViewDataResolvesSubGroupToParentGroup(t *testing.T) {
+	accepted := []string{"U1"}
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	groupNames := map[string]string{"G1": "Team A"}
+	subGroupParent := map[string]string{"SG1": "G1"}
+	subGroupID := "SG1"
+
+	events := []api.Event{
+		{
+			Heading:        "Subgroup event",
+			SubGroupId:     &subGroupID,
+			StartTimestamp: time.Date(2026, 6, 17, 18, 0, 0, 0, time.UTC),
+			Responses: &api.EventResponse{
+				AcceptedIds: &accepted,
+			},
+		},
+	}
+
+	upcoming, _ := buildEventViewData(events, []string{"U1"}, groupNames, subGroupParent, now)
+	if len(upcoming) != 1 {
+		t.Fatalf("expected 1 upcoming item, got %d", len(upcoming))
+	}
+
+	if upcoming[0].GroupID != "G1" {
+		t.Fatalf("expected parent group ID G1, got %q", upcoming[0].GroupID)
+	}
+
+	if upcoming[0].GroupName != "Team A" {
+		t.Fatalf("expected parent group name Team A, got %q", upcoming[0].GroupName)
+	}
+}
+
+func TestFilterEventViewData(t *testing.T) {
+	items := []eventViewData{
+		{Heading: "A", GroupID: "G1", StatusKey: "accepted"},
+		{Heading: "B", GroupID: "G2", StatusKey: "declined"},
+		{Heading: "C", GroupID: "G1", StatusKey: "unanswered"},
+	}
+
+	groups := map[string]struct{}{"G1": {}}
+	statuses := map[string]struct{}{"accepted": {}, "unanswered": {}}
+
+	filtered := filterEventViewData(items, groups, statuses)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 filtered events, got %d", len(filtered))
+	}
+
+	if filtered[0].Heading != "A" || filtered[1].Heading != "C" {
+		t.Fatalf("unexpected filtered order/content: %+v", filtered)
+	}
+}
+
+func TestNormalizeStatusFilterValues(t *testing.T) {
+	selected := normalizeStatusFilterValues([]string{"0", "2", "declined", "other", "unknown-value"})
+
+	if len(selected) != 4 {
+		t.Fatalf("expected 4 known status values, got %d", len(selected))
+	}
+
+	if _, ok := selected["accepted"]; !ok {
+		t.Fatalf("expected accepted to be selected, got %+v", selected)
+	}
+
+	if _, ok := selected["declined"]; !ok {
+		t.Fatalf("expected declined to be selected, got %+v", selected)
+	}
+
+	if _, ok := selected["unanswered"]; !ok {
+		t.Fatalf("expected unanswered to be selected, got %+v", selected)
+	}
+
+	if _, ok := selected["other"]; !ok {
+		t.Fatalf("expected other to be selected, got %+v", selected)
 	}
 }
 

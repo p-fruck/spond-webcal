@@ -198,6 +198,202 @@ func TestIndexRendersEventsForAuthenticatedSession(t *testing.T) {
 	}
 }
 
+func TestIndexFiltersEventsByGroupAndStatus(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]},
+				{"id":"G2","name":"Team B","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}
+			]`))
+		case "/sponds/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Query().Get("groupId") {
+			case "G1":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Accepted in Team A","groupId":"G1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+					{"id":"EVT2","heading":"Declined in Team A","groupId":"G1","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"declinedIds":["MEMBER1"]}}
+				]`))
+			case "G2":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT3","heading":"Accepted in Team B","groupId":"G2","startTimestamp":"2099-05-28T18:00:00Z","endTimestamp":"2099-05-28T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			default:
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Accepted in Team A","groupId":"G1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+					{"id":"EVT2","heading":"Declined in Team A","groupId":"G1","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"declinedIds":["MEMBER1"]}},
+					{"id":"EVT3","heading":"Accepted in Team B","groupId":"G2","startTimestamp":"2099-05-28T18:00:00Z","endTimestamp":"2099-05-28T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			}
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/?groups=G1&status=0,2", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Accepted in Team A") {
+		t.Fatalf("expected filtered accepted event from selected group, got %q", body)
+	}
+
+	if strings.Contains(body, "Declined in Team A") {
+		t.Fatalf("did not expect declined event when filtering by accepted/unanswered, got %q", body)
+	}
+
+	if strings.Contains(body, "Accepted in Team B") {
+		t.Fatalf("did not expect events from non-selected groups, got %q", body)
+	}
+}
+
+func TestIndexFiltersEventsByGroupWhenEventUsesSubGroupID(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}],"subGroups":[{"id":"SG1","name":"Squad 1"}]},
+				{"id":"G2","name":"Team B","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}],"subGroups":[{"id":"SG2","name":"Squad 2"}]}
+			]`))
+		case "/sponds/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Query().Get("groupId") {
+			case "G1":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Subgroup event in Team A","subGroupId":"SG1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			case "G2":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT2","heading":"Subgroup event in Team B","subGroupId":"SG2","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			default:
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Subgroup event in Team A","subGroupId":"SG1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+					{"id":"EVT2","heading":"Subgroup event in Team B","subGroupId":"SG2","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			}
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/?group=G1", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Subgroup event in Team A") {
+		t.Fatalf("expected subgroup event in selected parent group, got %q", body)
+	}
+
+	if strings.Contains(body, "Subgroup event in Team B") {
+		t.Fatalf("did not expect subgroup event from non-selected group, got %q", body)
+	}
+}
+
+func TestIndexFiltersEventsByGroupWhenEventsDoNotExposeGroupIDs(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]},
+				{"id":"G2","name":"Team B","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}
+			]`))
+		case "/sponds/":
+			groupID := r.URL.Query().Get("groupId")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			switch groupID {
+			case "G1":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Group A event no id fields","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			case "G2":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT2","heading":"Group B event no id fields","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			default:
+				_, _ = w.Write([]byte(`[]`))
+			}
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/?group=G1", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Group A event no id fields") {
+		t.Fatalf("expected group-scoped event for selected group, got %q", body)
+	}
+
+	if strings.Contains(body, "Group B event no id fields") {
+		t.Fatalf("did not expect events for unselected group, got %q", body)
+	}
+}
+
 func TestProfileRouteRequiresSession(t *testing.T) {
 	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/profile", nil)

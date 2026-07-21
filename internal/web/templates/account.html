@@ -22,6 +22,49 @@
       <span class="pill">Connected</span>
       <h1>Your events</h1>
 
+      <section class="filters">
+        <h2>Filters</h2>
+        <form method="get" action="/" class="filter-form" id="event-filters">
+          <div class="filter-dropdown" data-filter-dropdown>
+            <label>Groups</label>
+            <details>
+              <summary>
+                <span class="filter-summary" data-filter-summary-default="All groups">All groups</span>
+              </summary>
+              <div class="filter-options">
+                {{range .GroupFilters}}
+                  <label class="filter-option">
+                    <input type="checkbox" data-filter-key="groups" value="{{.ID}}" {{if .Selected}}checked{{end}}>
+                    <span>{{.Name}}</span>
+                  </label>
+                {{end}}
+              </div>
+            </details>
+          </div>
+
+          <div class="filter-dropdown" data-filter-dropdown>
+            <label>Response state</label>
+            <details>
+              <summary>
+                <span class="filter-summary" data-filter-summary-default="All states">All states</span>
+              </summary>
+              <div class="filter-options">
+                {{range .StatusFilters}}
+                  <label class="filter-option">
+                    <input type="checkbox" data-filter-key="status" value="{{.Value}}" {{if .Selected}}checked{{end}}>
+                    <span>{{.Label}}</span>
+                  </label>
+                {{end}}
+              </div>
+            </details>
+          </div>
+
+          <div class="filter-actions">
+            <a href="/">Clear</a>
+          </div>
+        </form>
+      </section>
+
       {{if .PastEvents}}
         <details class="past-events">
           <summary>Past events ({{len .PastEvents}})</summary>
@@ -30,6 +73,7 @@
               <li class="event-item">
                 <div>
                   <strong>{{.Heading}}</strong>
+                  <p class="event-group">{{.GroupName}}</p>
                   <p><time class="event-start" datetime="{{.StartISO}}" data-start="{{.StartISO}}">{{.StartTime}}</time></p>
                 </div>
                 <span class="status {{.StatusCSS}}">{{.Status}}</span>
@@ -47,6 +91,7 @@
               <li class="event-item">
                 <div>
                   <strong>{{.Heading}}</strong>
+                  <p class="event-group">{{.GroupName}}</p>
                   <p><time class="event-start" datetime="{{.StartISO}}" data-start="{{.StartISO}}">{{.StartTime}}</time></p>
                 </div>
                 <span class="status {{.StatusCSS}}">{{.Status}}</span>
@@ -82,6 +127,146 @@
           minute: '2-digit',
           timeZoneName: 'short'
         });
+      });
+
+      var filterForm = document.getElementById('event-filters');
+      if (!filterForm) {
+        return;
+      }
+
+      function checkboxLabel(input) {
+        var option = input.closest('.filter-option');
+        if (!option) {
+          return '';
+        }
+
+        var text = option.textContent || '';
+        return text.trim();
+      }
+
+      function updateSummary(dropdown) {
+        var summary = dropdown.querySelector('.filter-summary');
+        if (!summary) {
+          return;
+        }
+
+        var defaultLabel = summary.getAttribute('data-filter-summary-default') || 'All';
+        var checked = dropdown.querySelectorAll('input[type="checkbox"]:checked');
+        if (checked.length === 0) {
+          summary.textContent = defaultLabel;
+          return;
+        }
+
+        var labels = [];
+        checked.forEach(function (input) {
+          var label = checkboxLabel(input);
+          if (label !== '') {
+            labels.push(label);
+          }
+        });
+
+        if (labels.length === 0) {
+          summary.textContent = defaultLabel;
+          return;
+        }
+
+        summary.textContent = labels.join(', ');
+      }
+
+      function markDirty(dropdown) {
+        dropdown.setAttribute('data-dirty', 'true');
+      }
+
+      function clearDirty(dropdown) {
+        dropdown.removeAttribute('data-dirty');
+      }
+
+      function selectedFilterValues(key) {
+        var selector = 'input[type="checkbox"][data-filter-key="' + key + '"]:checked';
+        var checked = filterForm.querySelectorAll(selector);
+        var values = [];
+        checked.forEach(function (input) {
+          var value = input.value || '';
+          var trimmed = value.trim();
+          if (trimmed !== '') {
+            values.push(trimmed);
+          }
+        });
+        return values;
+      }
+
+      function buildFilterURL() {
+        var queryParts = [];
+
+        var groups = selectedFilterValues('groups');
+        if (groups.length > 0) {
+          var encodedGroups = groups.map(function (value) {
+            return encodeURIComponent(value);
+          });
+          queryParts.push('groups=' + encodedGroups.join(','));
+        }
+
+        var statuses = selectedFilterValues('status');
+        if (statuses.length > 0) {
+          var encodedStatuses = statuses.map(function (value) {
+            return encodeURIComponent(value);
+          });
+          queryParts.push('status=' + encodedStatuses.join(','));
+        }
+
+        if (queryParts.length === 0) {
+          return window.location.pathname + window.location.hash;
+        }
+
+        return window.location.pathname + '?' + queryParts.join('&') + window.location.hash;
+      }
+
+      function navigateWithFilters() {
+        window.location.assign(buildFilterURL());
+      }
+
+      var dropdowns = filterForm.querySelectorAll('[data-filter-dropdown]');
+      dropdowns.forEach(function (dropdown) {
+        var details = dropdown.querySelector('details');
+        if (!details) {
+          return;
+        }
+
+        updateSummary(dropdown);
+
+        dropdown.addEventListener('change', function () {
+          markDirty(dropdown);
+          updateSummary(dropdown);
+        });
+
+        details.addEventListener('toggle', function () {
+          if (details.open) {
+            return;
+          }
+
+          if (dropdown.getAttribute('data-dirty') === 'true') {
+            clearDirty(dropdown);
+            navigateWithFilters();
+          }
+        });
+      });
+
+      document.addEventListener('click', function (event) {
+        dropdowns.forEach(function (dropdown) {
+          var details = dropdown.querySelector('details');
+          if (!details || !details.open) {
+            return;
+          }
+
+          if (!dropdown.contains(event.target)) {
+            details.open = false;
+          }
+        });
+      });
+
+      filterForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        navigateWithFilters();
       });
     })();
   </script>

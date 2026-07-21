@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"code.p-fruck.eu/spond-webcal/internal/api"
 	"code.p-fruck.eu/spond-webcal/internal/config"
 	"code.p-fruck.eu/spond-webcal/internal/spond"
 )
@@ -70,16 +71,44 @@ func (s *Server) handleEventsPage(c echo.Context) error {
 	}
 	client.SetToken(session.Token)
 
-	events, err := client.FetchEvents(c.Request().Context(), 100)
+	groups, err := client.FetchGroups(c.Request().Context())
 	if err != nil {
 		s.clearSession(c)
 		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
 	}
 
-	upcomingEvents, pastEvents := buildEventViewData(events, session.ActorIDs, time.Now().UTC())
+	selectedGroupIDsList := parseCompactFilterValues(c.QueryParams(), "groups", "group")
+	selectedGroupIDs := normalizeFilterValues(selectedGroupIDsList)
+	selectedStatuses := normalizeStatusFilterValues(parseCompactFilterValues(c.QueryParams(), "status"))
+
+	var events []api.Event
+	if len(selectedGroupIDsList) > 0 {
+		events, err = client.FetchEventsForGroups(c.Request().Context(), 100, selectedGroupIDsList)
+	} else {
+		events, err = client.FetchEvents(c.Request().Context(), 100)
+	}
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	groupNamesByID := buildGroupNamesByID(groups)
+	subGroupParentByID := buildSubGroupParentByID(groups)
+	upcomingEvents, pastEvents := buildEventViewData(events, session.ActorIDs, groupNamesByID, subGroupParentByID, time.Now().UTC())
+
+	groupFilter := selectedGroupIDs
+	if len(selectedGroupIDsList) > 0 {
+		groupFilter = nil
+	}
+
+	upcomingEvents = filterEventViewData(upcomingEvents, groupFilter, selectedStatuses)
+	pastEvents = filterEventViewData(pastEvents, groupFilter, selectedStatuses)
+
 	data := accountPageData{
 		Name:           session.Name,
 		Email:          session.Email,
+		GroupFilters:   buildGroupFilterViewData(groups, selectedGroupIDs),
+		StatusFilters:  buildStatusFilterViewData(selectedStatuses),
 		UpcomingEvents: upcomingEvents,
 		PastEvents:     pastEvents,
 	}
@@ -247,4 +276,44 @@ func mustSubFS(fsys fs.FS, dir string) fs.FS {
 	}
 
 	return sub
+}
+
+func normalizeFilterList(values []string) []string {
+	items := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+
+		seen[trimmed] = struct{}{}
+		items = append(items, trimmed)
+	}
+
+	return items
+}
+
+func parseCompactFilterValues(queryParams map[string][]string, names ...string) []string {
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, queryParams[name]...)
+	}
+
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		for _, split := range strings.Split(part, ",") {
+			trimmed := strings.TrimSpace(split)
+			if trimmed == "" {
+				continue
+			}
+			values = append(values, trimmed)
+		}
+	}
+
+	return normalizeFilterList(values)
 }
