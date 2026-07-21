@@ -48,6 +48,22 @@
           </dd>
         </div>
       </dl>
+
+      <section class="groups">
+        <h2>Groups</h2>
+        {{if .Groups}}
+          <ul class="group-list">
+            {{range .Groups}}
+              <li>
+                <a href="/groups/{{.ID}}">{{.Name}}</a>
+                <span>{{.MemberCount}} members</span>
+              </li>
+            {{end}}
+          </ul>
+        {{else}}
+          <p class="empty-events">No groups connected.</p>
+        {{end}}
+      </section>
     </main>
   </div>
 </body>

@@ -22,6 +22,7 @@ type profilePageData struct {
 	ProfileID  string
 	GroupCount int
 	ActorIDs   []string
+	Groups     []groupSummaryData
 }
 
 type eventViewData struct {

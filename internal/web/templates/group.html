@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Spond WebCAL - Group</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-account page-group">
+  <div class="page-shell">
+    <nav class="top-nav">
+      <div class="top-nav__links">
+        <a href="/">Events</a>
+        <a href="/profile">Profile</a>
+      </div>
+      <form method="post" action="/logout">
+        <button class="nav-logout" type="submit">Logout</button>
+      </form>
+    </nav>
+
+    <main class="card">
+      <h1>{{.Group.Name}}</h1>
+      <dl>
+        <div>
+          <dt>Group ID</dt>
+          <dd>{{.Group.ID}}</dd>
+        </div>
+        <div>
+          <dt>Members</dt>
+          <dd>{{len .Group.Members}}</dd>
+        </div>
+        <div>
+          <dt>Subgroups</dt>
+          <dd>{{.Group.SubGroups}}</dd>
+        </div>
+      </dl>
+
+      <section class="groups">
+        <h2>Members</h2>
+        {{if .Group.Members}}
+          <ul class="member-list">
+            {{range .Group.Members}}
+              <li>
+                <strong>{{.Name}}</strong>
+                <span>{{if .Email}}{{.Email}}{{else}}no email{{end}}</span>
+                <span>member: {{.MemberID}}</span>
+                {{if .ProfileID}}<span>profile: {{.ProfileID}}</span>{{end}}
+              </li>
+            {{end}}
+          </ul>
+        {{else}}
+          <p class="empty-events">No members found.</p>
+        {{end}}
+      </section>
+    </main>
+  </div>
+</body>
+</html>

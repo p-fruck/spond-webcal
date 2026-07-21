@@ -228,7 +228,7 @@ func TestProfileRouteRendersForAuthenticatedSession(t *testing.T) {
 		case "/groups/":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
 		default:
 			t.Fatalf("unexpected API path: %s", r.URL.Path)
 		}
@@ -258,6 +258,103 @@ func TestProfileRouteRendersForAuthenticatedSession(t *testing.T) {
 
 	if !strings.Contains(body, "Groups connected") {
 		t.Fatalf("expected groups section in content, got %q", body)
+	}
+
+	if !strings.Contains(body, "Team Alpha") || !strings.Contains(body, "href=\"/groups/G1\"") {
+		t.Fatalf("expected group link in profile page, got %q", body)
+	}
+}
+
+func TestGroupDetailRouteRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/groups/G1", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestGroupDetailRouteRendersForAuthenticatedSession(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}],"subGroups":[{"id":"SG1","name":"Sub A"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/groups/G1", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Team Alpha") {
+		t.Fatalf("expected group name in detail page, got %q", body)
+	}
+
+	if !strings.Contains(body, "MEMBER1") {
+		t.Fatalf("expected member id in detail page, got %q", body)
+	}
+}
+
+func TestGroupDetailRouteReturnsNotFoundWhenMissing(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/groups/DOES_NOT_EXIST", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }
 

@@ -49,6 +49,7 @@ func NewServer(cfg config.Config, caldavHandler http.Handler) (*Server, error) {
 	e.GET("/signin", s.handleSigninPage)
 	e.POST("/signin", s.handleSigninPost)
 	e.GET("/profile", s.handleProfilePage)
+	e.GET("/groups/:groupID", s.handleGroupDetailPage)
 	e.POST("/logout", s.handleLogoutPost)
 
 	e.Any("/caldav", echo.WrapHandler(caldavHandler))
@@ -165,11 +166,60 @@ func (s *Server) handleProfilePage(c echo.Context) error {
 		return c.Redirect(http.StatusSeeOther, "/signin")
 	}
 
-	data := profilePageData{Name: session.Name, Email: session.Email}
-	data.ProfileID = session.ProfileID
-	data.GroupCount = session.GroupCount
-	data.ActorIDs = session.ActorIDs
+	client, err := spond.New(s.cfg.SpondBaseURL)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
+	}
+	client.SetToken(session.Token)
+
+	groups, err := client.FetchGroups(c.Request().Context())
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	data := profilePageData{
+		Name:       session.Name,
+		Email:      session.Email,
+		ProfileID:  session.ProfileID,
+		GroupCount: len(groups),
+		ActorIDs:   session.ActorIDs,
+		Groups:     buildGroupSummaryData(groups),
+	}
+
 	return s.renderTemplate(c, "profile.html", data)
+}
+
+func (s *Server) handleGroupDetailPage(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	groupID := strings.TrimSpace(c.Param("groupID"))
+	if groupID == "" {
+		return c.String(http.StatusNotFound, "group not found")
+	}
+
+	client, err := spond.New(s.cfg.SpondBaseURL)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
+	}
+	client.SetToken(session.Token)
+
+	groups, err := client.FetchGroups(c.Request().Context())
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	group, found := findGroupByID(groups, groupID)
+	if !found {
+		return c.String(http.StatusNotFound, groupNotFoundError(groupID))
+	}
+
+	data := groupDetailPageData{Group: buildGroupDetailData(group)}
+	return s.renderTemplate(c, "group.html", data)
 }
 
 func (s *Server) handleLogoutPost(c echo.Context) error {
