@@ -1,7 +1,6 @@
 package web
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,13 +13,33 @@ import (
 
 func newTestServer(t *testing.T, cfg config.Config) *Server {
 	t.Helper()
+	if cfg.CookieSecret == "" {
+		cfg.CookieSecret = "test-cookie-secret"
+	}
 
 	h, err := caldav.NewHandler(caldav.NewMemoryResourceStore(), "test")
 	if err != nil {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	return NewServer(cfg, h)
+	server, err := NewServer(cfg, h)
+	if err != nil {
+		t.Fatalf("new web server: %v", err)
+	}
+
+	return server
+}
+
+func TestNewServerRequiresCookieSecret(t *testing.T) {
+	h, err := caldav.NewHandler(caldav.NewMemoryResourceStore(), "test")
+	if err != nil {
+		t.Fatalf("new caldav handler: %v", err)
+	}
+
+	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h)
+	if err == nil {
+		t.Fatal("expected NewServer to require cookie secret")
+	}
 }
 
 func TestHealthzRouteReturnsOK(t *testing.T) {
@@ -39,9 +58,25 @@ func TestHealthzRouteReturnsOK(t *testing.T) {
 	}
 }
 
-func TestIndexRouteRendersSigninPage(t *testing.T) {
+func TestIndexRouteRedirectsToSigninWithoutSession(t *testing.T) {
 	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestSigninPageRenders(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/signin", nil)
 	rec := httptest.NewRecorder()
 
 	server.Echo().ServeHTTP(rec, req)
@@ -60,7 +95,7 @@ func TestIndexRouteRendersSigninPage(t *testing.T) {
 	}
 }
 
-func TestSigninShowsAccountNameOnSuccess(t *testing.T) {
+func TestSigninSetsSessionAndRedirects(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth2/login":
@@ -68,38 +103,13 @@ func TestSigninShowsAccountNameOnSuccess(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
 		case "/profile":
-			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
-				t.Fatalf("expected bearer token header, got %q", got)
-			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
 		case "/groups/":
-			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
-				t.Fatalf("expected bearer token header, got %q", got)
-			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
-		case "/sponds/":
-			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
-				t.Fatalf("expected bearer token header, got %q", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{
-				"id":"EVT1",
-				"heading":"Training",
-				"startTimestamp":"2099-05-26T18:00:00Z",
-				"endTimestamp":"2099-05-26T19:00:00Z",
-				"responses":{"acceptedIds":["MEMBER1"]}
-			},{
-				"id":"EVT2",
-				"heading":"Match",
-				"startTimestamp":"2000-05-27T18:00:00Z",
-				"endTimestamp":"2000-05-27T19:00:00Z",
-				"responses":{"declinedIds":["MEMBER1"]}
-			}]`))
 		default:
 			t.Fatalf("unexpected API path: %s", r.URL.Path)
 		}
@@ -117,41 +127,141 @@ func TestSigninShowsAccountNameOnSuccess(t *testing.T) {
 
 	server.Echo().ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/" {
+		t.Fatalf("expected redirect to /, got %q", location)
+	}
+
+	if len(rec.Result().Cookies()) == 0 {
+		t.Fatal("expected session cookie to be set")
+	}
+}
+
+func TestIndexRendersEventsForAuthenticatedSession(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		case "/sponds/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"EVT1","heading":"Training","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Signed in successfully") {
-		t.Fatalf("expected account page title, got %q", body)
-	}
-
-	if !strings.Contains(body, "Ada Lovelace") {
-		t.Fatalf("expected account name in response, got %q", body)
+	if !strings.Contains(body, "Your events") {
+		t.Fatalf("expected events page, got %q", body)
 	}
 
 	if !strings.Contains(body, "Training") || !strings.Contains(body, "Accepted") {
-		t.Fatalf("expected accepted event in response, got %q", body)
+		t.Fatalf("expected rendered event status, got %q", body)
 	}
 
-	if !strings.Contains(body, "Match") || !strings.Contains(body, "Declined") {
-		t.Fatalf("expected declined event in response, got %q", body)
+	if !strings.Contains(body, "href=\"/profile\"") {
+		t.Fatalf("expected navbar profile link, got %q", body)
 	}
 
-	if !strings.Contains(body, "Past events (1)") {
-		t.Fatalf("expected past events disclosure, got %q", body)
-	}
-
-	if strings.Index(body, "Past events (1)") > strings.Index(body, "Upcoming events") {
-		t.Fatalf("expected past events disclosure above upcoming events, got %q", body)
-	}
-
-	if !strings.Contains(body, "class=\"event-start\"") || !strings.Contains(body, "data-start=") {
-		t.Fatalf("expected local-time conversion markup in response, got %q", body)
+	if !strings.Contains(body, "action=\"/logout\"") {
+		t.Fatalf("expected logout form, got %q", body)
 	}
 }
 
-func TestSigninRedirectsToIndexOnLoginFailure(t *testing.T) {
+func TestProfileRouteRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/profile", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestProfileRouteRendersForAuthenticatedSession(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/profile", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Profile") || !strings.Contains(body, "Ada Lovelace") {
+		t.Fatalf("expected profile content, got %q", body)
+	}
+
+	if !strings.Contains(body, "PROFILE1") {
+		t.Fatalf("expected profile id in content, got %q", body)
+	}
+
+	if !strings.Contains(body, "Groups connected") {
+		t.Fatalf("expected groups section in content, got %q", body)
+	}
+}
+
+func TestSigninRedirectsOnLoginFailure(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/auth2/login" {
 			t.Fatalf("unexpected API path: %s", r.URL.Path)
@@ -175,8 +285,8 @@ func TestSigninRedirectsToIndexOnLoginFailure(t *testing.T) {
 		t.Fatalf("expected redirect status %d, got %d", http.StatusSeeOther, rec.Code)
 	}
 
-	if location := rec.Header().Get("Location"); location != "/?error=login" {
-		t.Fatalf("expected redirect to /?error=login, got %q", location)
+	if location := rec.Header().Get("Location"); location != "/signin?error=login" {
+		t.Fatalf("expected redirect to /signin?error=login, got %q", location)
 	}
 }
 
@@ -192,8 +302,35 @@ func TestSigninMissingFormFieldsRedirects(t *testing.T) {
 		t.Fatalf("expected redirect status %d, got %d", http.StatusSeeOther, rec.Code)
 	}
 
-	if location := rec.Header().Get("Location"); location != "/?error=missing" {
-		t.Fatalf("expected redirect to /?error=missing, got %q", location)
+	if location := rec.Header().Get("Location"); location != "/signin?error=missing" {
+		t.Fatalf("expected redirect to /signin?error=missing, got %q", location)
+	}
+}
+
+func TestLogoutClearsSessionAndRedirectsToSignin(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+
+	var found bool
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sessionCookieName && cookie.MaxAge < 0 {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Fatal("expected logout to clear session cookie")
 	}
 }
 
@@ -237,9 +374,9 @@ func TestWellKnownCalDAVRedirectsToCalDAV(t *testing.T) {
 	}
 }
 
-func TestIndexRouteShowsErrorMessageWhenRequested(t *testing.T) {
+func TestSigninRouteShowsErrorMessageWhenRequested(t *testing.T) {
 	server := newTestServer(t, config.Config{Addr: ":9090"})
-	req := httptest.NewRequest(http.MethodGet, "/?error=login", nil)
+	req := httptest.NewRequest(http.MethodGet, "/signin?error=login", nil)
 	rec := httptest.NewRecorder()
 
 	server.Echo().ServeHTTP(rec, req)
@@ -248,13 +385,9 @@ func TestIndexRouteShowsErrorMessageWhenRequested(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	body, err := io.ReadAll(rec.Body)
-	if err != nil {
-		t.Fatalf("read response body: %v", err)
-	}
-
-	if !strings.Contains(string(body), "Login failed") {
-		t.Fatalf("expected login error message, got %q", string(body))
+	body := rec.Body.String()
+	if !strings.Contains(body, "Login failed") {
+		t.Fatalf("expected login error message, got %q", body)
 	}
 }
 
@@ -273,4 +406,31 @@ func TestStaticCSSIsServed(t *testing.T) {
 	if !strings.Contains(body, ".page-signin") {
 		t.Fatalf("expected css body to contain page-signin rules, got %q", body)
 	}
+}
+
+func signinAndGetSessionCookie(t *testing.T, server *Server) *http.Cookie {
+	t.Helper()
+
+	form := url.Values{}
+	form.Set("email", "ada@example.com")
+	form.Set("password", "secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/signin", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected sign-in redirect status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			return cookie
+		}
+	}
+
+	t.Fatal("expected session cookie after signin")
+	return nil
 }

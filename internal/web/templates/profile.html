@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Spond WebCAL - Profile</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-account page-profile">
+  <div class="page-shell">
+    <nav class="top-nav">
+      <div class="top-nav__links">
+        <a href="/">Events</a>
+        <a class="active" href="/profile">Profile</a>
+      </div>
+      <form method="post" action="/logout">
+        <button class="nav-logout" type="submit">Logout</button>
+      </form>
+    </nav>
+
+    <main class="card">
+      <h1>Profile</h1>
+      <dl>
+        <div>
+          <dt>Account name</dt>
+          <dd>{{.Name}}</dd>
+        </div>
+        <div>
+          <dt>Email</dt>
+          <dd>{{.Email}}</dd>
+        </div>
+        <div>
+          <dt>Profile ID</dt>
+          <dd>{{.ProfileID}}</dd>
+        </div>
+        <div>
+          <dt>Groups connected</dt>
+          <dd>{{.GroupCount}}</dd>
+        </div>
+        <div>
+          <dt>Linked actor IDs</dt>
+          <dd>
+            {{if .ActorIDs}}
+              {{range $index, $id := .ActorIDs}}{{if $index}}, {{end}}{{$id}}{{end}}
+            {{else}}
+              none
+            {{end}}
+          </dd>
+        </div>
+      </dl>
+    </main>
+  </div>
+</body>
+</html>

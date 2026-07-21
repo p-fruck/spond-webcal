@@ -142,6 +142,10 @@ func (c *Client) Token() string {
 	return c.token
 }
 
+func (c *Client) SetToken(token string) {
+	c.token = token
+}
+
 func (c *Client) bearerRequestEditor() api.RequestEditorFn {
 	return func(_ context.Context, req *http.Request) error {
 		req.Header.Set("Authorization", "Bearer "+c.token)

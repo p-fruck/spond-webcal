@@ -31,7 +31,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	server := web.NewServer(cfg, caldavHandler)
+	server, err := web.NewServer(cfg, caldavHandler)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("starting spond-webcal server on %s (spond api: %s)", cfg.Addr, cfg.SpondBaseURL)
 
 	if err := server.Start(cfg.Addr); err != nil {

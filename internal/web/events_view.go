@@ -16,6 +16,14 @@ type accountPageData struct {
 	PastEvents     []eventViewData
 }
 
+type profilePageData struct {
+	Name       string
+	Email      string
+	ProfileID  string
+	GroupCount int
+	ActorIDs   []string
+}
+
 type eventViewData struct {
 	Heading   string
 	StartISO  string

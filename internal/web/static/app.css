@@ -116,12 +116,63 @@ h1 {
     radial-gradient(circle at 8% 10%, #d8eadf 0, transparent 33%),
     radial-gradient(circle at 95% 80%, #f0f8f2 0, transparent 45%),
     var(--bg);
+
+  display: block;
+  padding: 0;
 }
 
 .page-account .card {
+  width: 100%;
   background: var(--card);
   border: 1px solid #cde0d5;
   box-shadow: 0 20px 38px rgba(20, 32, 25, 0.12);
+}
+
+.page-account .page-shell {
+  width: min(900px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page-account .top-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #cde0d5;
+  border-radius: 10px;
+  background: #f6fbf8;
+}
+
+.page-account .top-nav__links {
+  display: flex;
+  gap: 8px;
+}
+
+.page-account .top-nav a {
+  display: inline-block;
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #214537;
+  font-weight: 600;
+}
+
+.page-account .top-nav a.active {
+  background: #e7f5ed;
+  border: 1px solid #b8ddc8;
+}
+
+.page-account .nav-logout {
+  border: 1px solid #c6d8ce;
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .page-account .pill {
@@ -155,14 +206,6 @@ h1 {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
-}
-
-.page-account a {
-  margin-top: 18px;
-  display: inline-block;
-  color: var(--accent);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
 }
 
 .page-account .events {

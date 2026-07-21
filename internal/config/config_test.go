@@ -5,7 +5,7 @@ import "testing"
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("SPOND_WEBCAL_ADDR", "")
 	t.Setenv("SPOND_WEBCAL_DB_URL", "")
-	t.Setenv("SPOND_WEBCAL_COOKIE_SECRET", "")
+	t.Setenv("SPOND_WEBCAL_COOKIE_SECRET", "dev-secret")
 	t.Setenv("SPOND_WEBCAL_LOG_LEVEL", "")
 	t.Setenv("SPOND_WEBCAL_SPOND_BASE_URL", "")
 
@@ -19,8 +19,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 		t.Fatalf("expected default db url %q, got %q", defaultDBURL, config.DBURL)
 	}
 
-	if config.CookieSecret != "" {
-		t.Fatalf("expected empty cookie secret, got %q", config.CookieSecret)
+	if config.CookieSecret != "dev-secret" {
+		t.Fatalf("expected cookie secret dev-secret, got %q", config.CookieSecret)
 	}
 
 	if config.LogLevel != defaultLogLevel {
