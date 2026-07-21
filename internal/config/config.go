@@ -3,7 +3,7 @@ package config
 import "os"
 
 const (
-	defaultAddr         = ":8080"
+	defaultAddr         = "localhost:8080"
 	defaultDBURL        = "file:./app.db"
 	defaultLogLevel     = "info"
 	defaultSpondBaseURL = "https://api.spond.com/core/v1"

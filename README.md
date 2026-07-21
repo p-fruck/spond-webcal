@@ -1,49 +1,49 @@
-# Spond WebCAL Server
+# Spond Calendar
 
-A multi-tenant CalDAV/WebCal server written in Go that bridges the proprietary Spond app with standard calendar protocols. Sync your Spond events to any CalDAV/WebCal-compatible client (DAVx5, ICSx5, iOS Calendar, etc.) and update attendance directly from your phone.
+A multi-tenant CalDAV server with a web UI, written in Go, that bridges the proprietary Spond app with standard calendar tooling.
 
 ## Features
 
-- [ ] **Bidirectional Sync**: Accept/decline events from your phone and sync back to Spond
-- [ ] **Multi-Tenant**: Sign in with multiple Spond accounts independently
-- [ ] **CalDAV + WebCal**: Support for both protocols
-  - [ ] **CalDAV**: Bidirectional (read+write); update attendance via DAVx5/ICSx5 on Android
-  - [ ] **WebCal**: Read-only iCalendar subscription; suitable for iOS Calendar and others
-- [ ] **Token-Based Sharing**: Create shareable calendar links with configurable scopes
-  - [ ] Public/private calendars
-  - [ ] Read-only or read-write access
-  - [ ] Filter by event status (accepted/declined/tentative)
-- [ ] **Web UI**: Sign-in dashboard + account overview + token management
+- [x] **Web UI + Auth Session**
+  - [x] Dedicated sign-in page (`/signin`)
+  - [x] Cookie-based authenticated session
+  - [x] Events dashboard at `/`
+  - [x] Profile page (`/profile`) and logout (`/logout`)
+- [x] **Spond Event Listing**
+  - [x] Upcoming events list
+  - [x] Past events in collapsible section
+  - [x] RSVP status mapping (accepted/declined/waiting/unconfirmed/unanswered/unknown)
+- [x] **CalDAV Baseline**
+  - [x] CalDAV endpoints mounted (`/caldav`)
+  - [x] Persistence-backed resource store
+  - [x] ETag + If-Match conflict semantics
+- [ ] **Write-Back to Spond RSVP changes**
+- [ ] **iCalendar (ICS) feed endpoint**
+  - [ ] HTTP ICS feed
+  - [ ] Optional `webcal://` link exposure for compatible clients
+- [ ] **Token-based sharing links/scopes**
+- [ ] **Full multi-account UX in web app**
 
 ## Quick Start
 
 ```bash
 just gen-client
-just run
+SPOND_WEBCAL_COOKIE_SECRET=mysecret just run
 ```
 
 ### Configuration
 
-Environment variables (all optional, defaults shown):
+Environment variables:
 
 ```bash
-SPOND_WEBCAL_ADDR=":8080"              # Listen address
-SPOND_WEBCAL_DB_URL="file:./app.db"    # Database URL (SQLite file or postgres://)
-SPOND_WEBCAL_COOKIE_SECRET=""          # Secret for session cookies (MUST set in production)
-SPOND_WEBCAL_LOG_LEVEL="debug"         # Enable debug logging
+SPOND_WEBCAL_ADDR=":8080"                           # Listen address
+SPOND_WEBCAL_DB_URL="file:./app.db"                 # Database URL (SQLite file or postgres://)
+SPOND_WEBCAL_COOKIE_SECRET="<required-random-secret>" # REQUIRED for startup
+SPOND_WEBCAL_LOG_LEVEL="info"                       # Log level
+SPOND_WEBCAL_SPOND_BASE_URL="https://api.spond.com/core/v1" # Spond API base URL
 ```
 
 See the [developer docs](docs/dev.md) for detailed architecture and developer guide.
-
-## Supported Calendar Apps
-
-| App | Platform | Protocol | Write-Back |
-|-----|----------|----------|-----------|
-| DAVx5 | Android | CalDAV | ✓ Yes |
-| ICSx5 | Android | CalDAV | ✓ Yes |
-| Apple Calendar | iOS/macOS | WebCal | ✗ No |
-| Thunderbird | Desktop | CalDAV | ✓ Yes |
-| GNOME Calendar | Linux | CalDAV | ✓ Yes |
 
 ## Known Limitations
 

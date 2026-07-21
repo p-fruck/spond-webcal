@@ -17,6 +17,7 @@ For full project context, workflow, testing conventions, and architecture detail
 3. Keep changes small and incremental.
 4. Run checks before finishing: format/lint/test
 5. Prefer clear error wrapping and dependency injection via interfaces.
+6. Never hardcode secrets, tokens, API keys, or fallback secret values in code. Use config/env only; fail fast when required secrets are missing.
 
 ## Project Facts
 
