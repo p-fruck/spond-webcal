@@ -12,6 +12,13 @@ AGENTS.md is intentionally minimal and points here for full context.
 - OpenAPI + oapi-codegen
 - Testify + mockery
 
+## Current Runtime Notes
+
+- The application currently uses GORM auto-migration during startup via `db.OpenAndMigrate`; there is no active SQL migration pipeline in the repository.
+- The `migrations/` folder is not required for the current build/run flow and is not present in this workspace snapshot.
+- Access tokens are persisted in the database and are managed from the Profile page.
+- The background sync worker is enabled from `cmd/spond-webcal/main.go` and uses the same DB-backed user token store.
+
 ## Setup
 
 1. Generate the API client from the OpenAPI spec:
@@ -29,6 +36,8 @@ just test
 ```
 
 or: `just ci`
+
+The current CI and local verification flow also runs pre-commit-style checks via `prek` and the full Go test suite.
 
 ## Development Workflow
 
@@ -65,14 +74,21 @@ just ci
 ```text
 cmd/spond-webcal/        entrypoint
 internal/api/            generated OpenAPI client
-internal/spond/          Spond API wrapper
-internal/caldav/         CalDAV + iCal handling
-internal/db/             models and persistence
 internal/auth/           session/token handling
+internal/caldav/         CalDAV + iCal handling
+internal/config/         Configuration via environment variables
+internal/db/             models and persistence
+internal/spond/          Spond API wrapper
+internal/syncworker/     Periodic background sync of Spond events
 internal/web/            HTTP handlers and templates
-migrations/              database migrations
 tests/                   unit, integration, fixtures
 ```
+
+## Database And Schema
+
+- Startup opens the configured database and runs `AutoMigrate` for the current models.
+- Schema changes are therefore handled in Go code, not via standalone SQL migration files.
+- If a future migration system is introduced, the docs should be updated alongside the corresponding command/path changes.
 
 ## Adding a New Spond Endpoint
 
