@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("SPOND_WEBCAL_ADDR", "")
@@ -8,6 +11,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("SPOND_WEBCAL_COOKIE_SECRET", "dev-secret")
 	t.Setenv("SPOND_WEBCAL_LOG_LEVEL", "")
 	t.Setenv("SPOND_WEBCAL_SPOND_BASE_URL", "")
+	t.Setenv("SPOND_WEBCAL_SYNC_INTERVAL", "")
+	t.Setenv("SPOND_WEBCAL_SYNC_TIMEOUT", "")
 
 	config := Load()
 
@@ -30,6 +35,14 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if config.SpondBaseURL != defaultSpondBaseURL {
 		t.Fatalf("expected default spond base url %q, got %q", defaultSpondBaseURL, config.SpondBaseURL)
 	}
+
+	if config.SyncInterval != defaultSyncInterval {
+		t.Fatalf("expected default sync interval %s, got %s", defaultSyncInterval, config.SyncInterval)
+	}
+
+	if config.SyncTimeout != defaultSyncTimeout {
+		t.Fatalf("expected default sync timeout %s, got %s", defaultSyncTimeout, config.SyncTimeout)
+	}
 }
 
 func TestLoadUsesEnvironmentOverrides(t *testing.T) {
@@ -38,6 +51,8 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("SPOND_WEBCAL_COOKIE_SECRET", "secret")
 	t.Setenv("SPOND_WEBCAL_LOG_LEVEL", "info")
 	t.Setenv("SPOND_WEBCAL_SPOND_BASE_URL", "http://localhost:9999")
+	t.Setenv("SPOND_WEBCAL_SYNC_INTERVAL", "2m")
+	t.Setenv("SPOND_WEBCAL_SYNC_TIMEOUT", "15s")
 
 	config := Load()
 
@@ -59,5 +74,28 @@ func TestLoadUsesEnvironmentOverrides(t *testing.T) {
 
 	if config.SpondBaseURL != "http://localhost:9999" {
 		t.Fatalf("expected overridden spond base url, got %q", config.SpondBaseURL)
+	}
+
+	if config.SyncInterval != 2*time.Minute {
+		t.Fatalf("expected overridden sync interval 2m, got %s", config.SyncInterval)
+	}
+
+	if config.SyncTimeout != 15*time.Second {
+		t.Fatalf("expected overridden sync timeout 15s, got %s", config.SyncTimeout)
+	}
+}
+
+func TestLoadFallsBackForInvalidDuration(t *testing.T) {
+	t.Setenv("SPOND_WEBCAL_SYNC_INTERVAL", "bad")
+	t.Setenv("SPOND_WEBCAL_SYNC_TIMEOUT", "0s")
+
+	config := Load()
+
+	if config.SyncInterval != defaultSyncInterval {
+		t.Fatalf("expected default sync interval on invalid value, got %s", config.SyncInterval)
+	}
+
+	if config.SyncTimeout != defaultSyncTimeout {
+		t.Fatalf("expected default sync timeout on invalid value, got %s", config.SyncTimeout)
 	}
 }

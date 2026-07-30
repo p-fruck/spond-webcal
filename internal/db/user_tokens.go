@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -12,11 +13,19 @@ type UserTokenStore struct {
 	database *gorm.DB
 }
 
+type UserTokenRecord struct {
+	UserID       uint
+	ProfileID    string
+	SpondEmail   string
+	SpondToken   string
+	TokenExpires *time.Time
+}
+
 func NewUserTokenStore(database *gorm.DB) *UserTokenStore {
 	return &UserTokenStore{database: database}
 }
 
-func (s *UserTokenStore) UpsertUserToken(ctx context.Context, profileID, email, token string) (uint, error) {
+func (s *UserTokenStore) UpsertUserToken(ctx context.Context, profileID, email, token string, tokenExpires *time.Time) (uint, error) {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
 		return 0, fmt.Errorf("profile id is required")
@@ -30,9 +39,10 @@ func (s *UserTokenStore) UpsertUserToken(ctx context.Context, profileID, email, 
 		}
 
 		newUser := User{
-			ProfileID:  profileID,
-			SpondEmail: strings.TrimSpace(email),
-			SpondToken: strings.TrimSpace(token),
+			ProfileID:    profileID,
+			SpondEmail:   strings.TrimSpace(email),
+			SpondToken:   strings.TrimSpace(token),
+			TokenExpires: tokenExpires,
 		}
 		if createErr := s.database.WithContext(ctx).Create(&newUser).Error; createErr != nil {
 			return 0, fmt.Errorf("create user: %w", createErr)
@@ -43,6 +53,7 @@ func (s *UserTokenStore) UpsertUserToken(ctx context.Context, profileID, email, 
 
 	user.SpondEmail = strings.TrimSpace(email)
 	user.SpondToken = strings.TrimSpace(token)
+	user.TokenExpires = tokenExpires
 	if saveErr := s.database.WithContext(ctx).Save(&user).Error; saveErr != nil {
 		return 0, fmt.Errorf("update user token: %w", saveErr)
 	}
@@ -67,4 +78,27 @@ func (s *UserTokenStore) TokenByUserID(ctx context.Context, userID uint) (string
 	}
 
 	return token, nil
+}
+
+func (s *UserTokenStore) ActiveUsersWithToken(ctx context.Context) ([]UserTokenRecord, error) {
+	var users []User
+	err := s.database.WithContext(ctx).
+		Where("spond_token <> ''").
+		Find(&users).Error
+	if err != nil {
+		return nil, fmt.Errorf("list active users: %w", err)
+	}
+
+	records := make([]UserTokenRecord, 0, len(users))
+	for _, user := range users {
+		records = append(records, UserTokenRecord{
+			UserID:       user.ID,
+			ProfileID:    user.ProfileID,
+			SpondEmail:   user.SpondEmail,
+			SpondToken:   user.SpondToken,
+			TokenExpires: user.TokenExpires,
+		})
+	}
+
+	return records, nil
 }

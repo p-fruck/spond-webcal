@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type UserTokenStore interface {
-	UpsertUserToken(ctx context.Context, profileID, email, token string) (uint, error)
+	UpsertUserToken(ctx context.Context, profileID, email, token string, tokenExpires *time.Time) (uint, error)
 	TokenByUserID(ctx context.Context, userID uint) (string, error)
 }
 
@@ -22,6 +23,7 @@ type memoryUser struct {
 	profileID string
 	email     string
 	token     string
+	expiresAt *time.Time
 }
 
 func NewMemoryUserTokenStore() *MemoryUserTokenStore {
@@ -32,7 +34,7 @@ func NewMemoryUserTokenStore() *MemoryUserTokenStore {
 	}
 }
 
-func (s *MemoryUserTokenStore) UpsertUserToken(_ context.Context, profileID, email, token string) (uint, error) {
+func (s *MemoryUserTokenStore) UpsertUserToken(_ context.Context, profileID, email, token string, tokenExpires *time.Time) (uint, error) {
 	if profileID == "" {
 		return 0, fmt.Errorf("profile id is required")
 	}
@@ -44,6 +46,7 @@ func (s *MemoryUserTokenStore) UpsertUserToken(_ context.Context, profileID, ema
 		u := s.users[userID]
 		u.email = email
 		u.token = token
+		u.expiresAt = tokenExpires
 		s.users[userID] = u
 		return userID, nil
 	}
@@ -51,7 +54,7 @@ func (s *MemoryUserTokenStore) UpsertUserToken(_ context.Context, profileID, ema
 	userID := s.nextID
 	s.nextID++
 	s.byProf[profileID] = userID
-	s.users[userID] = memoryUser{profileID: profileID, email: email, token: token}
+	s.users[userID] = memoryUser{profileID: profileID, email: email, token: token, expiresAt: tokenExpires}
 
 	return userID, nil
 }

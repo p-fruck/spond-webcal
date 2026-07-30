@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -14,8 +15,9 @@ import (
 )
 
 type Client struct {
-	apiClient api.ClientInterface
-	token     string
+	apiClient      api.ClientInterface
+	token          string
+	tokenExpiresAt *time.Time
 }
 
 func New(baseURL string, opts ...api.ClientOption) (*Client, error) {
@@ -58,6 +60,7 @@ func (c *Client) Login(ctx context.Context, email, password string) error {
 	}
 
 	c.token = *authResponse.AccessToken.Token
+	c.tokenExpiresAt = authResponse.AccessToken.Expiration
 	return nil
 }
 
@@ -215,6 +218,10 @@ func (c *Client) Token() string {
 
 func (c *Client) SetToken(token string) {
 	c.token = token
+}
+
+func (c *Client) TokenExpiresAt() *time.Time {
+	return c.tokenExpiresAt
 }
 
 func (c *Client) bearerRequestEditor() api.RequestEditorFn {

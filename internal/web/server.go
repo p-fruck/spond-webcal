@@ -215,7 +215,7 @@ func (s *Server) handleSigninPost(c echo.Context) error {
 		profileEmail = string(*profile.Email)
 	}
 
-	userID, err := s.userStore.UpsertUserToken(c.Request().Context(), profile.Id, profileEmail, client.Token())
+	userID, err := s.userStore.UpsertUserToken(c.Request().Context(), profile.Id, profileEmail, client.Token(), client.TokenExpiresAt())
 	if err != nil {
 		return c.String(http.StatusInternalServerError, "failed to persist user session")
 	}
