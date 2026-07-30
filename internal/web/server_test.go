@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"code.p-fruck.eu/spond-webcal/internal/caldav"
 	"code.p-fruck.eu/spond-webcal/internal/config"
@@ -22,7 +23,26 @@ func newTestServer(t *testing.T, cfg config.Config) *Server {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	server, err := NewServer(cfg, h, NewMemoryUserTokenStore())
+	server, err := NewServer(cfg, h, NewMemoryUserTokenStore(), NewMemoryEventSyncStore())
+	if err != nil {
+		t.Fatalf("new web server: %v", err)
+	}
+
+	return server
+}
+
+func newTestServerWithSyncStore(t *testing.T, cfg config.Config, syncStore EventSyncStore) *Server {
+	t.Helper()
+	if cfg.CookieSecret == "" {
+		cfg.CookieSecret = "test-cookie-secret"
+	}
+
+	h, err := caldav.NewHandler(caldav.NewMemoryResourceStore(), "test")
+	if err != nil {
+		t.Fatalf("new caldav handler: %v", err)
+	}
+
+	server, err := NewServer(cfg, h, NewMemoryUserTokenStore(), syncStore)
 	if err != nil {
 		t.Fatalf("new web server: %v", err)
 	}
@@ -36,7 +56,7 @@ func TestNewServerRequiresCookieSecret(t *testing.T) {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h, NewMemoryUserTokenStore())
+	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h, NewMemoryUserTokenStore(), NewMemoryEventSyncStore())
 	if err == nil {
 		t.Fatal("expected NewServer to require cookie secret")
 	}
@@ -196,6 +216,10 @@ func TestIndexRendersEventsForAuthenticatedSession(t *testing.T) {
 	if !strings.Contains(body, "action=\"/logout\"") {
 		t.Fatalf("expected logout form, got %q", body)
 	}
+
+	if !strings.Contains(body, "Last sync") || !strings.Contains(body, "Next sync") || !strings.Contains(body, "Sync now") {
+		t.Fatalf("expected sync status controls, got %q", body)
+	}
 }
 
 func TestIndexFiltersEventsByGroupAndStatus(t *testing.T) {
@@ -265,6 +289,68 @@ func TestIndexFiltersEventsByGroupAndStatus(t *testing.T) {
 
 	if strings.Contains(body, "Accepted in Team B") {
 		t.Fatalf("did not expect events from non-selected groups, got %q", body)
+	}
+}
+
+func TestEventsSyncNowRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodPost, "/api/events/sync", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestEventsSyncNowRunsAndReturnsSchedule(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		case "/sponds/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"EVT1","heading":"Training","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z"}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServerWithSyncStore(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL, SyncInterval: 3 * time.Minute}, NewMemoryEventSyncStore())
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/sync", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "sync completed") || !strings.Contains(body, "eventCount") || !strings.Contains(body, "nextSyncAt") {
+		t.Fatalf("expected sync payload fields, got %q", body)
 	}
 }
 

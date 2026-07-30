@@ -20,6 +20,14 @@
 
     <main class="card">
       <span class="pill">Connected</span>
+      <section class="sync-overview">
+        <p>Last sync: <time id="last-sync-time" data-sync-time="{{.LastSyncISO}}">{{.LastSyncLabel}}</time></p>
+        <p>Next sync: <time id="next-sync-time" data-sync-time="{{.NextSyncISO}}">{{.NextSyncLabel}}</time></p>
+        <div class="filter-actions">
+          <button type="button" class="nav-logout" id="sync-now-button" {{if not .SyncEnabled}}disabled{{end}}>Sync now</button>
+          <p class="empty-events" id="sync-now-status">{{if .SyncEnabled}}Idle{{else}}Sync unavailable{{end}}</p>
+        </div>
+      </section>
       <h1>Your events</h1>
 
       <section class="filters">
@@ -129,6 +137,75 @@
           timeZoneName: 'short'
         });
       });
+
+      function formatSyncTimeElement(el) {
+        if (!el) {
+          return;
+        }
+
+        var iso = el.getAttribute('data-sync-time');
+        if (!iso) {
+          return;
+        }
+
+        var date = new Date(iso);
+        if (isNaN(date.getTime())) {
+          return;
+        }
+
+        el.textContent = date.toLocaleString(undefined, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        });
+      }
+
+      var lastSyncTimeEl = document.getElementById('last-sync-time');
+      var nextSyncTimeEl = document.getElementById('next-sync-time');
+      var syncNowButton = document.getElementById('sync-now-button');
+      var syncNowStatus = document.getElementById('sync-now-status');
+
+      formatSyncTimeElement(lastSyncTimeEl);
+      formatSyncTimeElement(nextSyncTimeEl);
+
+      if (syncNowButton && syncNowStatus && !syncNowButton.disabled) {
+        syncNowButton.addEventListener('click', async function () {
+          syncNowButton.disabled = true;
+          syncNowStatus.textContent = 'Syncing...';
+
+          try {
+            var res = await fetch('/api/events/sync', {
+              method: 'POST',
+              credentials: 'same-origin'
+            });
+
+            if (!res.ok) {
+              throw new Error('HTTP ' + res.status);
+            }
+
+            var payload = await res.json();
+            if (payload.lastSyncAt) {
+              lastSyncTimeEl.setAttribute('data-sync-time', payload.lastSyncAt);
+              formatSyncTimeElement(lastSyncTimeEl);
+            }
+
+            if (payload.nextSyncAt) {
+              nextSyncTimeEl.setAttribute('data-sync-time', payload.nextSyncAt);
+              formatSyncTimeElement(nextSyncTimeEl);
+            }
+
+            var count = typeof payload.eventCount === 'number' ? payload.eventCount : 0;
+            syncNowStatus.textContent = 'Sync complete (' + count + ' events)';
+          } catch (err) {
+            syncNowStatus.textContent = 'Sync failed: ' + err;
+          } finally {
+            syncNowButton.disabled = false;
+          }
+        });
+      }
 
       var filterForm = document.getElementById('event-filters');
       if (!filterForm) {

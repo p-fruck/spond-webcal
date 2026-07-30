@@ -62,3 +62,26 @@ func (s *SpondCacheStore) UpsertUserEvents(ctx context.Context, userID uint, eve
 
 	return nil
 }
+
+func (s *SpondCacheStore) LastSyncedAtByUserID(ctx context.Context, userID uint) (*time.Time, error) {
+	var row SpondCache
+	err := s.database.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("last_synced DESC").
+		Limit(1).
+		First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("query latest spond cache row: %w", err)
+	}
+
+	if row.LastSynced.IsZero() {
+		return nil, nil
+	}
+
+	lastSynced := row.LastSynced.UTC()
+	return &lastSynced, nil
+}

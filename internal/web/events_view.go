@@ -12,6 +12,11 @@ import (
 type accountPageData struct {
 	Name           string
 	Email          string
+	SyncEnabled    bool
+	LastSyncISO    string
+	LastSyncLabel  string
+	NextSyncISO    string
+	NextSyncLabel  string
 	GroupFilters   []groupFilterViewData
 	StatusFilters  []statusFilterViewData
 	UpcomingEvents []eventViewData

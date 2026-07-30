@@ -53,7 +53,7 @@ func main() {
 	worker.Start(workerCtx)
 	log.Printf("events sync worker enabled (interval=%s timeout=%s)", cfg.SyncInterval, cfg.SyncTimeout)
 
-	server, err := web.NewServer(cfg, caldavHandler, userTokenStore)
+	server, err := web.NewServer(cfg, caldavHandler, userTokenStore, cacheStore)
 	if err != nil {
 		log.Fatal(err)
 	}

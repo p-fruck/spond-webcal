@@ -188,6 +188,27 @@ h1 {
   text-transform: uppercase;
 }
 
+.page-account .sync-overview {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #d5e3db;
+  border-radius: 10px;
+  background: #f8fbf9;
+  display: grid;
+  gap: 8px;
+}
+
+.page-account .sync-overview p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.page-account .sync-overview time {
+  color: #214537;
+  font-weight: 600;
+}
+
 .page-account dl {
   margin: 18px 0 0;
   display: grid;

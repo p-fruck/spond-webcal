@@ -20,9 +20,10 @@ type Server struct {
 	templates *template.Template
 	cfg       config.Config
 	userStore UserTokenStore
+	syncStore EventSyncStore
 }
 
-func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserTokenStore) (*Server, error) {
+func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserTokenStore, syncStore EventSyncStore) (*Server, error) {
 	if strings.TrimSpace(cfg.CookieSecret) == "" {
 		return nil, fmt.Errorf("SPOND_WEBCAL_COOKIE_SECRET is required")
 	}
@@ -49,13 +50,14 @@ func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserToke
 		})
 	})
 
-	s := &Server{e: e, templates: templates, cfg: cfg, userStore: userStore}
+	s := &Server{e: e, templates: templates, cfg: cfg, userStore: userStore, syncStore: syncStore}
 
 	e.GET("/", s.handleEventsPage)
 	e.GET("/events.ics", s.handleEventsExport)
 	e.GET("/signin", s.handleSigninPage)
 	e.POST("/signin", s.handleSigninPost)
 	e.GET("/profile", s.handleProfilePage)
+	e.POST("/api/events/sync", s.handleEventsSyncNowAPI)
 	e.POST("/api/profile/tokens/reveal", s.handleProfileTokensAPI)
 	e.POST("/api/profile/tokens/refresh", s.handleProfileTokensRefreshAPI)
 	e.GET("/groups/:groupID", s.handleGroupDetailPage)
@@ -83,7 +85,55 @@ func (s *Server) handleEventsPage(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, "failed to load events")
 	}
 
+	s.addSyncStatusToAccountPageData(c, session.UserID, &data)
+
 	return s.renderTemplate(c, "account.html", data)
+}
+
+func (s *Server) handleEventsSyncNowAPI(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	if s.syncStore == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "sync store is not configured"})
+	}
+
+	accessToken, accessExpires, refreshToken, refreshExpires, err := s.userStore.TokenMetadataByUserID(c.Request().Context(), session.UserID)
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	token, err := chooseTokenForImmediateSync(accessToken, accessExpires, refreshToken, refreshExpires, time.Now().UTC())
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	client, err := spond.New(s.cfg.SpondBaseURL)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
+	}
+	client.SetToken(token)
+
+	events, err := client.FetchEvents(c.Request().Context(), 200)
+	if err != nil {
+		return c.String(http.StatusBadGateway, "failed to fetch events from spond")
+	}
+
+	syncedAt := time.Now().UTC()
+	if err := s.syncStore.UpsertUserEvents(c.Request().Context(), session.UserID, events, syncedAt); err != nil {
+		return c.String(http.StatusInternalServerError, "failed to cache synced events")
+	}
+
+	nextSync := syncedAt.Add(s.effectiveSyncInterval())
+	return c.JSON(http.StatusOK, map[string]any{
+		"message":    "sync completed",
+		"eventCount": len(events),
+		"lastSyncAt": syncedAt.Format(time.RFC3339),
+		"nextSyncAt": nextSync.Format(time.RFC3339),
+	})
 }
 
 func (s *Server) handleEventsExport(c echo.Context) error {
@@ -444,6 +494,82 @@ func parseBoolQueryParam(value string, defaultValue bool) bool {
 	default:
 		return defaultValue
 	}
+}
+
+func (s *Server) addSyncStatusToAccountPageData(c echo.Context, userID uint, data *accountPageData) {
+	data.SyncEnabled = s.syncStore != nil
+	if !data.SyncEnabled {
+		data.LastSyncLabel = "Sync unavailable"
+		data.NextSyncLabel = "Sync unavailable"
+		return
+	}
+
+	lastSyncedAt, err := s.syncStore.LastSyncedAtByUserID(c.Request().Context(), userID)
+	if err != nil {
+		data.LastSyncLabel = "Sync status unavailable"
+		data.NextSyncLabel = "Sync status unavailable"
+		return
+	}
+
+	if lastSyncedAt == nil {
+		nextSync := time.Now().UTC().Add(s.effectiveSyncInterval())
+		data.LastSyncLabel = "Not synced yet"
+		data.NextSyncISO = nextSync.Format(time.RFC3339)
+		data.NextSyncLabel = nextSync.Format("2006-01-02 15:04 UTC")
+		return
+	}
+
+	data.LastSyncISO = lastSyncedAt.UTC().Format(time.RFC3339)
+	data.LastSyncLabel = lastSyncedAt.UTC().Format("2006-01-02 15:04 UTC")
+
+	nextSync := lastSyncedAt.UTC().Add(s.effectiveSyncInterval())
+	data.NextSyncISO = nextSync.Format(time.RFC3339)
+	data.NextSyncLabel = nextSync.Format("2006-01-02 15:04 UTC")
+}
+
+func (s *Server) effectiveSyncInterval() time.Duration {
+	if s.cfg.SyncInterval > 0 {
+		return s.cfg.SyncInterval
+	}
+
+	return 5 * time.Minute
+}
+
+func chooseTokenForImmediateSync(accessToken string, accessExpires *time.Time, refreshToken string, refreshExpires *time.Time, now time.Time) (string, error) {
+	const expirySkew = 30 * time.Second
+
+	accessToken = strings.TrimSpace(accessToken)
+	refreshToken = strings.TrimSpace(refreshToken)
+
+	accessValid := accessToken != "" && (accessExpires == nil || accessExpires.After(now.Add(expirySkew)))
+	if accessValid {
+		return accessToken, nil
+	}
+
+	refreshValid := refreshToken != "" && (refreshExpires == nil || refreshExpires.After(now.Add(expirySkew)))
+	if refreshValid {
+		return refreshToken, nil
+	}
+
+	if accessToken == "" && refreshToken == "" {
+		return "", fmt.Errorf("no usable spond token is stored")
+	}
+
+	if accessExpires != nil && accessExpires.Before(now.Add(expirySkew)) {
+		if refreshExpires != nil && refreshExpires.Before(now.Add(expirySkew)) {
+			return "", fmt.Errorf("access and refresh tokens are expired")
+		}
+
+		if refreshToken == "" {
+			return "", fmt.Errorf("access token expired and no refresh token stored")
+		}
+	}
+
+	if accessToken != "" {
+		return accessToken, nil
+	}
+
+	return "", fmt.Errorf("no usable spond token is available")
 }
 
 func (s *Server) spondClientForSession(c echo.Context, session authSession) (*spond.Client, bool, error) {
