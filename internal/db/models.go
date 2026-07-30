@@ -3,7 +3,8 @@ package db
 import "time"
 
 type User struct {
-	ID           uint `gorm:"primaryKey"`
+	ID           uint   `gorm:"primaryKey"`
+	ProfileID    string `gorm:"uniqueIndex;size:128"`
 	SpondEmail   string
 	SpondToken   string
 	TokenExpires *time.Time

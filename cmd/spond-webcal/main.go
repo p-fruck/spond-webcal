@@ -31,7 +31,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	server, err := web.NewServer(cfg, caldavHandler)
+	userTokenStore := db.NewUserTokenStore(database)
+
+	server, err := web.NewServer(cfg, caldavHandler, userTokenStore)
 	if err != nil {
 		log.Fatal(err)
 	}

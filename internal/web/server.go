@@ -19,11 +19,16 @@ type Server struct {
 	e         *echo.Echo
 	templates *template.Template
 	cfg       config.Config
+	userStore UserTokenStore
 }
 
-func NewServer(cfg config.Config, caldavHandler http.Handler) (*Server, error) {
+func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserTokenStore) (*Server, error) {
 	if strings.TrimSpace(cfg.CookieSecret) == "" {
 		return nil, fmt.Errorf("SPOND_WEBCAL_COOKIE_SECRET is required")
+	}
+
+	if userStore == nil {
+		return nil, fmt.Errorf("user token store is required")
 	}
 
 	e := echo.New()
@@ -44,7 +49,7 @@ func NewServer(cfg config.Config, caldavHandler http.Handler) (*Server, error) {
 		})
 	})
 
-	s := &Server{e: e, templates: templates, cfg: cfg}
+	s := &Server{e: e, templates: templates, cfg: cfg, userStore: userStore}
 
 	e.GET("/", s.handleEventsPage)
 	e.GET("/events.ics", s.handleEventsExport)
@@ -105,11 +110,10 @@ func (s *Server) handleEventsExport(c echo.Context) error {
 }
 
 func (s *Server) loadFilteredEventsData(c echo.Context, session authSession) (accountPageData, bool, error) {
-	client, err := spond.New(s.cfg.SpondBaseURL)
+	client, shouldClearSession, err := s.spondClientForSession(c, session)
 	if err != nil {
-		return accountPageData{}, false, err
+		return accountPageData{}, shouldClearSession, err
 	}
-	client.SetToken(session.Token)
 
 	groups, err := client.FetchGroups(c.Request().Context())
 	if err != nil {
@@ -211,8 +215,13 @@ func (s *Server) handleSigninPost(c echo.Context) error {
 		profileEmail = string(*profile.Email)
 	}
 
+	userID, err := s.userStore.UpsertUserToken(c.Request().Context(), profile.Id, profileEmail, client.Token())
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to persist user session")
+	}
+
 	session := authSession{
-		Token:      client.Token(),
+		UserID:     userID,
 		Name:       fullNameFromProfile(profile.FirstName, profile.LastName, email),
 		Email:      profileEmail,
 		ProfileID:  profile.Id,
@@ -233,11 +242,15 @@ func (s *Server) handleProfilePage(c echo.Context) error {
 		return c.Redirect(http.StatusSeeOther, "/signin")
 	}
 
-	client, err := spond.New(s.cfg.SpondBaseURL)
+	client, shouldClearSession, err := s.spondClientForSession(c, session)
 	if err != nil {
+		if shouldClearSession {
+			s.clearSession(c)
+			return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		}
+
 		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
 	}
-	client.SetToken(session.Token)
 
 	groups, err := client.FetchGroups(c.Request().Context())
 	if err != nil {
@@ -268,11 +281,15 @@ func (s *Server) handleGroupDetailPage(c echo.Context) error {
 		return c.String(http.StatusNotFound, "group not found")
 	}
 
-	client, err := spond.New(s.cfg.SpondBaseURL)
+	client, shouldClearSession, err := s.spondClientForSession(c, session)
 	if err != nil {
+		if shouldClearSession {
+			s.clearSession(c)
+			return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		}
+
 		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
 	}
-	client.SetToken(session.Token)
 
 	groups, err := client.FetchGroups(c.Request().Context())
 	if err != nil {
@@ -370,4 +387,23 @@ func parseBoolQueryParam(value string, defaultValue bool) bool {
 	default:
 		return defaultValue
 	}
+}
+
+func (s *Server) spondClientForSession(c echo.Context, session authSession) (*spond.Client, bool, error) {
+	if session.UserID == 0 {
+		return nil, true, fmt.Errorf("missing user id in session")
+	}
+
+	token, err := s.userStore.TokenByUserID(c.Request().Context(), session.UserID)
+	if err != nil {
+		return nil, true, fmt.Errorf("load user token: %w", err)
+	}
+
+	client, err := spond.New(s.cfg.SpondBaseURL)
+	if err != nil {
+		return nil, false, err
+	}
+	client.SetToken(token)
+
+	return client, false, nil
 }

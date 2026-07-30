@@ -19,7 +19,7 @@ const (
 )
 
 type authSession struct {
-	Token      string   `json:"token"`
+	UserID     uint     `json:"userId"`
 	Name       string   `json:"name"`
 	Email      string   `json:"email"`
 	ProfileID  string   `json:"profileId"`
@@ -42,7 +42,7 @@ func (s *Server) readSession(c echo.Context) (authSession, bool) {
 		return authSession{}, false
 	}
 
-	if strings.TrimSpace(session.Token) == "" {
+	if session.UserID == 0 {
 		return authSession{}, false
 	}
 

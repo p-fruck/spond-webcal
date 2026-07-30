@@ -22,7 +22,7 @@ func newTestServer(t *testing.T, cfg config.Config) *Server {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	server, err := NewServer(cfg, h)
+	server, err := NewServer(cfg, h, NewMemoryUserTokenStore())
 	if err != nil {
 		t.Fatalf("new web server: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestNewServerRequiresCookieSecret(t *testing.T) {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h)
+	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h, NewMemoryUserTokenStore())
 	if err == nil {
 		t.Fatal("expected NewServer to require cookie secret")
 	}
