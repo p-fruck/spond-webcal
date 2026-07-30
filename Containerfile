@@ -9,6 +9,13 @@ RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 
+COPY openapi.yaml ./
+RUN go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 -package api \
+            -generate types,client \
+            -o internal/api/client.gen.go \
+            openapi.yaml
+
+
 # Copy source and build a static binary.
 COPY . .
 ARG TARGETOS=linux

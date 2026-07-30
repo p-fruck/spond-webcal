@@ -26,6 +26,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Generate OpenAPI client
+        run: |
+          go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 -package api \
+            -generate types,client \
+            -o internal/api/client.gen.go \
+            openapi.yaml
+
       - name: Run prek hooks
         uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
 

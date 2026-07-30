@@ -1,0 +1,8 @@
+*
+!cmd
+!internal
+internal/api/gen.go
+!go.mod
+!go.sum
+!openapi.yaml
+!tools.go
