@@ -56,6 +56,8 @@ func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserToke
 	e.GET("/signin", s.handleSigninPage)
 	e.POST("/signin", s.handleSigninPost)
 	e.GET("/profile", s.handleProfilePage)
+	e.POST("/api/profile/tokens/reveal", s.handleProfileTokensAPI)
+	e.POST("/api/profile/tokens/refresh", s.handleProfileTokensRefreshAPI)
 	e.GET("/groups/:groupID", s.handleGroupDetailPage)
 	e.POST("/logout", s.handleLogoutPost)
 
@@ -215,7 +217,15 @@ func (s *Server) handleSigninPost(c echo.Context) error {
 		profileEmail = string(*profile.Email)
 	}
 
-	userID, err := s.userStore.UpsertUserToken(c.Request().Context(), profile.Id, profileEmail, client.Token(), client.TokenExpiresAt())
+	userID, err := s.userStore.UpsertUserToken(
+		c.Request().Context(),
+		profile.Id,
+		profileEmail,
+		client.Token(),
+		client.TokenExpiresAt(),
+		client.RefreshToken(),
+		client.RefreshTokenExpiresAt(),
+	)
 	if err != nil {
 		return c.String(http.StatusInternalServerError, "failed to persist user session")
 	}
@@ -268,6 +278,53 @@ func (s *Server) handleProfilePage(c echo.Context) error {
 	}
 
 	return s.renderTemplate(c, "profile.html", data)
+}
+
+func (s *Server) handleProfileTokensAPI(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	tokens, err := s.tokenPayloadForUser(c, session.UserID)
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	return c.JSON(http.StatusOK, tokens)
+}
+
+func (s *Server) handleProfileTokensRefreshAPI(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	accessToken, _, refreshToken, _, err := s.userStore.TokenMetadataByUserID(c.Request().Context(), session.UserID)
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	refreshToken = strings.TrimSpace(refreshToken)
+	if refreshToken == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no refresh token is stored"})
+	}
+
+	if err := s.userStore.PromoteRefreshTokenByUserID(c.Request().Context(), session.UserID); err != nil {
+		return c.String(http.StatusInternalServerError, "failed to promote refresh token")
+	}
+
+	tokens, err := s.tokenPayloadForUser(c, session.UserID)
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	tokens["message"] = "refresh token promoted to active access token"
+	tokens["previousAccessToken"] = accessToken
+	return c.JSON(http.StatusOK, tokens)
 }
 
 func (s *Server) handleGroupDetailPage(c echo.Context) error {
@@ -406,4 +463,28 @@ func (s *Server) spondClientForSession(c echo.Context, session authSession) (*sp
 	client.SetToken(token)
 
 	return client, false, nil
+}
+
+func (s *Server) tokenPayloadForUser(c echo.Context, userID uint) (map[string]any, error) {
+	accessToken, accessExpires, refreshToken, refreshExpires, err := s.userStore.TokenMetadataByUserID(c.Request().Context(), userID)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{
+		"accessToken":           accessToken,
+		"refreshToken":          refreshToken,
+		"accessTokenExpiresAt":  nil,
+		"refreshTokenExpiresAt": nil,
+	}
+
+	if accessExpires != nil {
+		payload["accessTokenExpiresAt"] = accessExpires.UTC().Format(time.RFC3339)
+	}
+
+	if refreshExpires != nil {
+		payload["refreshTokenExpiresAt"] = refreshExpires.UTC().Format(time.RFC3339)
+	}
+
+	return payload, nil
 }

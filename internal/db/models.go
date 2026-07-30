@@ -3,13 +3,15 @@ package db
 import "time"
 
 type User struct {
-	ID           uint   `gorm:"primaryKey"`
-	ProfileID    string `gorm:"uniqueIndex;size:128"`
-	SpondEmail   string
-	SpondToken   string
-	TokenExpires *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                  uint   `gorm:"primaryKey"`
+	ProfileID           string `gorm:"uniqueIndex;size:128"`
+	SpondEmail          string
+	SpondToken          string
+	TokenExpires        *time.Time
+	RefreshToken        string
+	RefreshTokenExpires *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Calendar struct {

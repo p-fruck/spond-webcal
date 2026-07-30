@@ -615,6 +615,111 @@ func TestProfileRouteRendersForAuthenticatedSession(t *testing.T) {
 	if !strings.Contains(body, "Team Alpha") || !strings.Contains(body, "href=\"/groups/G1\"") {
 		t.Fatalf("expected group link in profile page, got %q", body)
 	}
+
+	if !strings.Contains(body, "Show token state") || !strings.Contains(body, "Refresh now") {
+		t.Fatalf("expected advanced token controls in profile page, got %q", body)
+	}
+}
+
+func TestProfileTokensAPIRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodPost, "/api/profile/tokens/reveal", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestProfileTokensAPIReturnsStoredTokens(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123","expiration":"2099-01-01T00:00:00Z"},"refreshToken":{"token":"REFRESH123","expiration":"2099-02-01T00:00:00Z"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profile/tokens/reveal", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "TOKEN123") || !strings.Contains(body, "REFRESH123") {
+		t.Fatalf("expected access/refresh tokens in payload, got %q", body)
+	}
+}
+
+func TestProfileTokensRefreshPromotesRefreshToken(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123","expiration":"2001-01-01T00:00:00Z"},"refreshToken":{"token":"REFRESH123","expiration":"2099-02-01T00:00:00Z"}}`))
+		case "/profile":
+			if got := r.Header.Get("Authorization"); got != "Bearer REFRESH123" && got != "Bearer TOKEN123" {
+				t.Fatalf("unexpected bearer token %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profile/tokens/refresh", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "refresh token promoted") {
+		t.Fatalf("expected promotion message, got %q", body)
+	}
+
+	if !strings.Contains(body, "REFRESH123") {
+		t.Fatalf("expected promoted access token to be refresh token, got %q", body)
+	}
 }
 
 func TestGroupDetailRouteRequiresSession(t *testing.T) {

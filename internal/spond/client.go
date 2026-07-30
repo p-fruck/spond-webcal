@@ -15,9 +15,11 @@ import (
 )
 
 type Client struct {
-	apiClient      api.ClientInterface
-	token          string
-	tokenExpiresAt *time.Time
+	apiClient             api.ClientInterface
+	token                 string
+	tokenExpiresAt        *time.Time
+	refreshToken          string
+	refreshTokenExpiresAt *time.Time
 }
 
 func New(baseURL string, opts ...api.ClientOption) (*Client, error) {
@@ -61,6 +63,12 @@ func (c *Client) Login(ctx context.Context, email, password string) error {
 
 	c.token = *authResponse.AccessToken.Token
 	c.tokenExpiresAt = authResponse.AccessToken.Expiration
+	if authResponse.RefreshToken != nil {
+		if authResponse.RefreshToken.Token != nil {
+			c.refreshToken = *authResponse.RefreshToken.Token
+		}
+		c.refreshTokenExpiresAt = authResponse.RefreshToken.Expiration
+	}
 	return nil
 }
 
@@ -222,6 +230,14 @@ func (c *Client) SetToken(token string) {
 
 func (c *Client) TokenExpiresAt() *time.Time {
 	return c.tokenExpiresAt
+}
+
+func (c *Client) RefreshToken() string {
+	return c.refreshToken
+}
+
+func (c *Client) RefreshTokenExpiresAt() *time.Time {
+	return c.refreshTokenExpiresAt
 }
 
 func (c *Client) bearerRequestEditor() api.RequestEditorFn {

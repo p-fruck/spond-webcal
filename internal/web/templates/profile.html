@@ -64,7 +64,75 @@
           <p class="empty-events">No groups connected.</p>
         {{end}}
       </section>
+
+      <section class="groups">
+        <h2>Advanced</h2>
+        <p class="empty-events">Inspect token state and trigger a manual refresh-token promotion.</p>
+        <div class="filter-actions">
+          <button type="button" class="nav-logout" id="load-token-state">Show token state</button>
+          <button type="button" class="nav-logout" id="manual-token-refresh">Refresh now</button>
+        </div>
+        <pre id="token-state-output" class="empty-events">No token data loaded.</pre>
+      </section>
     </main>
   </div>
+
+  <script>
+    (function () {
+      var loadButton = document.getElementById('load-token-state');
+      var refreshButton = document.getElementById('manual-token-refresh');
+      var output = document.getElementById('token-state-output');
+      if (!loadButton || !refreshButton || !output) {
+        return;
+      }
+
+      function renderPayload(payload) {
+        output.textContent = JSON.stringify(payload, null, 2);
+      }
+
+      function renderError(action, err) {
+        output.textContent = action + ' failed: ' + err;
+      }
+
+      async function loadTokens() {
+        try {
+          var res = await fetch('/api/profile/tokens/reveal', {
+            method: 'POST',
+            credentials: 'same-origin'
+          });
+
+          if (!res.ok) {
+            throw new Error('HTTP ' + res.status);
+          }
+
+          var payload = await res.json();
+          renderPayload(payload);
+        } catch (err) {
+          renderError('Load tokens', err);
+        }
+      }
+
+      async function refreshTokens() {
+        try {
+          var res = await fetch('/api/profile/tokens/refresh', {
+            method: 'POST',
+            credentials: 'same-origin'
+          });
+
+          if (!res.ok) {
+            throw new Error('HTTP ' + res.status);
+          }
+
+          var payload = await res.json();
+          renderPayload(payload);
+        } catch (err) {
+          renderError('Refresh tokens', err);
+        }
+      }
+
+      loadButton.addEventListener('click', loadTokens);
+      refreshButton.addEventListener('click', refreshTokens);
+    })();
+  </script>
 </body>
 </html>
