@@ -60,6 +60,7 @@
           </div>
 
           <div class="filter-actions">
+            <a id="events-export-link" href="/events.ics">Export iCal</a>
             <a href="/">Clear</a>
           </div>
         </form>
@@ -225,6 +226,21 @@
         window.location.assign(buildFilterURL());
       }
 
+      function updateExportLink() {
+        var exportLink = document.getElementById('events-export-link');
+        if (!exportLink) {
+          return;
+        }
+
+        var query = buildFilterURL().split('?')[1] || '';
+        if (query === '') {
+          exportLink.href = '/events.ics';
+          return;
+        }
+
+        exportLink.href = '/events.ics?' + query.split('#')[0];
+      }
+
       var dropdowns = filterForm.querySelectorAll('[data-filter-dropdown]');
       dropdowns.forEach(function (dropdown) {
         var details = dropdown.querySelector('details');
@@ -237,6 +253,7 @@
         dropdown.addEventListener('change', function () {
           markDirty(dropdown);
           updateSummary(dropdown);
+          updateExportLink();
         });
 
         details.addEventListener('toggle', function () {
@@ -268,6 +285,8 @@
         event.preventDefault();
         navigateWithFilters();
       });
+
+      updateExportLink();
     })();
   </script>
 </body>

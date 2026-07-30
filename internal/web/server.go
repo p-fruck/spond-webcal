@@ -47,6 +47,7 @@ func NewServer(cfg config.Config, caldavHandler http.Handler) (*Server, error) {
 	s := &Server{e: e, templates: templates, cfg: cfg}
 
 	e.GET("/", s.handleEventsPage)
+	e.GET("/events.ics", s.handleEventsExport)
 	e.GET("/signin", s.handleSigninPage)
 	e.POST("/signin", s.handleSigninPost)
 	e.GET("/profile", s.handleProfilePage)
@@ -65,16 +66,54 @@ func (s *Server) handleEventsPage(c echo.Context) error {
 		return c.Redirect(http.StatusSeeOther, "/signin")
 	}
 
+	data, shouldClearSession, err := s.loadFilteredEventsData(c, session)
+	if err != nil {
+		if shouldClearSession {
+			s.clearSession(c)
+			return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		}
+
+		return c.String(http.StatusInternalServerError, "failed to load events")
+	}
+
+	return s.renderTemplate(c, "account.html", data)
+}
+
+func (s *Server) handleEventsExport(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	data, shouldClearSession, err := s.loadFilteredEventsData(c, session)
+	if err != nil {
+		if shouldClearSession {
+			s.clearSession(c)
+			return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		}
+
+		return c.String(http.StatusInternalServerError, "failed to export events")
+	}
+
+	includePast := parseBoolQueryParam(c.QueryParam("includePast"), false)
+	events := mergedSortedEvents(data.UpcomingEvents, includePastEvents(data.PastEvents, includePast))
+	ics := buildICSCalendar(events, time.Now().UTC())
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/calendar; charset=utf-8")
+	c.Response().Header().Set("Content-Disposition", "attachment; filename=events.ics")
+	return c.String(http.StatusOK, ics)
+}
+
+func (s *Server) loadFilteredEventsData(c echo.Context, session authSession) (accountPageData, bool, error) {
 	client, err := spond.New(s.cfg.SpondBaseURL)
 	if err != nil {
-		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
+		return accountPageData{}, false, err
 	}
 	client.SetToken(session.Token)
 
 	groups, err := client.FetchGroups(c.Request().Context())
 	if err != nil {
-		s.clearSession(c)
-		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		return accountPageData{}, true, err
 	}
 
 	selectedGroupIDsList := parseCompactFilterValues(c.QueryParams(), "groups", "group")
@@ -88,8 +127,7 @@ func (s *Server) handleEventsPage(c echo.Context) error {
 		events, err = client.FetchEvents(c.Request().Context(), 100)
 	}
 	if err != nil {
-		s.clearSession(c)
-		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		return accountPageData{}, true, err
 	}
 
 	groupNamesByID := buildGroupNamesByID(groups)
@@ -113,7 +151,7 @@ func (s *Server) handleEventsPage(c echo.Context) error {
 		PastEvents:     pastEvents,
 	}
 
-	return s.renderTemplate(c, "account.html", data)
+	return data, false, nil
 }
 
 func (s *Server) handleSigninPage(c echo.Context) error {
@@ -316,4 +354,20 @@ func parseCompactFilterValues(queryParams map[string][]string, names ...string) 
 	}
 
 	return normalizeFilterList(values)
+}
+
+func parseBoolQueryParam(value string, defaultValue bool) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "" {
+		return defaultValue
+	}
+
+	switch trimmed {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }

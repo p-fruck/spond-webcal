@@ -268,6 +268,162 @@ func TestIndexFiltersEventsByGroupAndStatus(t *testing.T) {
 	}
 }
 
+func TestEventsExportRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/events.ics", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestEventsExportReturnsICSWithAppliedFilters(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]},
+				{"id":"G2","name":"Team B","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}
+			]`))
+		case "/sponds/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Query().Get("groupId") {
+			case "G1":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Accepted in Team A","groupId":"G1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+					{"id":"EVT2","heading":"Declined in Team A","groupId":"G1","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"declinedIds":["MEMBER1"]}}
+				]`))
+			case "G2":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT3","heading":"Accepted in Team B","groupId":"G2","startTimestamp":"2099-05-28T18:00:00Z","endTimestamp":"2099-05-28T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			default:
+				_, _ = w.Write([]byte(`[]`))
+			}
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/events.ics?groups=G1&status=0,2", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/calendar") {
+		t.Fatalf("expected text/calendar content type, got %q", ct)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "BEGIN:VCALENDAR") || !strings.Contains(body, "BEGIN:VEVENT") {
+		t.Fatalf("expected ICS payload, got %q", body)
+	}
+
+	if !strings.Contains(body, "SUMMARY:Accepted in Team A") {
+		t.Fatalf("expected accepted Team A event in export, got %q", body)
+	}
+
+	if strings.Contains(body, "SUMMARY:Declined in Team A") {
+		t.Fatalf("did not expect declined Team A event in export, got %q", body)
+	}
+
+	if strings.Contains(body, "SUMMARY:Accepted in Team B") {
+		t.Fatalf("did not expect Team B event in export, got %q", body)
+	}
+}
+
+func TestEventsExportIncludePastFlag(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}
+			]`))
+		case "/sponds/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"EVT-UPCOMING","heading":"Upcoming event","groupId":"G1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+				{"id":"EVT-PAST","heading":"Past event","groupId":"G1","startTimestamp":"2001-05-26T18:00:00Z","endTimestamp":"2001-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+			]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	reqDefault := httptest.NewRequest(http.MethodGet, "/events.ics", nil)
+	reqDefault.AddCookie(cookie)
+	recDefault := httptest.NewRecorder()
+	server.Echo().ServeHTTP(recDefault, reqDefault)
+
+	if recDefault.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recDefault.Code)
+	}
+
+	defaultBody := recDefault.Body.String()
+	if !strings.Contains(defaultBody, "SUMMARY:Upcoming event") {
+		t.Fatalf("expected upcoming event in default export, got %q", defaultBody)
+	}
+
+	if strings.Contains(defaultBody, "SUMMARY:Past event") {
+		t.Fatalf("did not expect past event in default export, got %q", defaultBody)
+	}
+
+	reqWithPast := httptest.NewRequest(http.MethodGet, "/events.ics?includePast=true", nil)
+	reqWithPast.AddCookie(cookie)
+	recWithPast := httptest.NewRecorder()
+	server.Echo().ServeHTTP(recWithPast, reqWithPast)
+
+	if recWithPast.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recWithPast.Code)
+	}
+
+	withPastBody := recWithPast.Body.String()
+	if !strings.Contains(withPastBody, "SUMMARY:Past event") {
+		t.Fatalf("expected past event when includePast=true, got %q", withPastBody)
+	}
+}
+
 func TestIndexFiltersEventsByGroupWhenEventUsesSubGroupID(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

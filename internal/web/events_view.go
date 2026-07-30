@@ -47,10 +47,12 @@ type profilePageData struct {
 }
 
 type eventViewData struct {
+	EventID   string
 	Heading   string
 	StartISO  string
 	StartTime string
 	StartAt   time.Time
+	EndAt     time.Time
 	GroupID   string
 	GroupName string
 	Status    string
@@ -76,10 +78,12 @@ func buildEventViewData(events []api.Event, actorIDs []string, groupNamesByID, s
 		}
 
 		item := eventViewData{
+			EventID:   event.Id,
 			Heading:   event.Heading,
 			StartISO:  event.StartTimestamp.UTC().Format(time.RFC3339),
 			StartTime: event.StartTimestamp.UTC().Format("2006-01-02 15:04 UTC"),
 			StartAt:   event.StartTimestamp,
+			EndAt:     event.EndTimestamp,
 			GroupID:   groupID,
 			GroupName: groupName,
 			Status:    status,
