@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Spond WebCAL - Create Access Token</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-account page-profile page-access-tokens">
+  <div class="page-shell">
+    <nav class="top-nav">
+      <div class="top-nav__links">
+        <a href="/">Events</a>
+        <a href="/profile">Profile</a>
+        <a class="active" href="/profile/access-tokens">Access tokens</a>
+      </div>
+      <form method="post" action="/logout">
+        <button class="nav-logout" type="submit">Logout</button>
+      </form>
+    </nav>
+
+    <main class="card">
+      <h1>Create iCal access token</h1>
+      <p class="empty-events">Choose which groups are accessible, which response states are visible, and whether past events are included.</p>
+      {{if .Error}}
+        <p class="error">{{.Error}}</p>
+      {{end}}
+
+      {{if .Groups}}
+        <form method="post" action="/profile/access-tokens/new" class="token-create-form">
+          <label>
+            Optional expiration
+            <input type="datetime-local" name="expiresAt" value="{{.Expiration}}">
+          </label>
+
+          <ul class="group-list">
+            {{range .Groups}}
+              <li>
+                <label>
+                  <input type="checkbox" class="group-enabled" name="group" value="{{.ID}}">
+                  <strong>{{.Name}}</strong>
+                </label>
+                <span>{{.MemberCount}} members</span>
+                <div class="token-rule-fields" data-group-fields="{{.ID}}">
+                  <label><input type="checkbox" name="status__{{.ID}}" value="accepted"> Accepted</label>
+                  <label><input type="checkbox" name="status__{{.ID}}" value="declined"> Declined</label>
+                  <label><input type="checkbox" name="status__{{.ID}}" value="unanswered"> Not answered</label>
+                  <label><input type="checkbox" name="status__{{.ID}}" value="other"> Other</label>
+                  <label><input type="checkbox" name="past__{{.ID}}" value="1"> Include past events</label>
+                </div>
+              </li>
+            {{end}}
+          </ul>
+
+          <div class="filter-actions">
+            <button type="submit" class="nav-logout">Create token</button>
+            <a href="/profile/access-tokens">Cancel</a>
+          </div>
+        </form>
+      {{else}}
+        <p class="empty-events">No groups connected.</p>
+      {{end}}
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var toggles = document.querySelectorAll('.group-enabled');
+      toggles.forEach(function (toggle) {
+        function updateState() {
+          var groupID = toggle.value;
+          var section = document.querySelector('[data-group-fields="' + groupID + '"]');
+          if (!section) {
+            return;
+          }
+
+          var enabled = toggle.checked;
+          var inputs = section.querySelectorAll('input[type="checkbox"]');
+          inputs.forEach(function (input) {
+            input.disabled = !enabled;
+            if (!enabled) {
+              input.checked = false;
+            }
+          });
+        }
+
+        toggle.addEventListener('change', updateState);
+        updateState();
+      });
+    })();
+  </script>
+</body>
+</html>

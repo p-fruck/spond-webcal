@@ -66,6 +66,48 @@
       </section>
 
       <section class="groups">
+        <h2>Access tokens</h2>
+        <p class="empty-events">Scoped export tokens for iCal clients.</p>
+        <div class="filter-actions">
+          <a href="/profile/access-tokens/new">Create token</a>
+        </div>
+
+        {{if .CreatedToken}}
+          <div class="token-created-banner">
+            <p class="empty-events">Token created. This is shown only once.</p>
+            <pre id="access-token-output">{{.CreatedToken}}</pre>
+            <p><a href="{{.CreatedExportURL}}">Open export URL</a></p>
+          </div>
+        {{end}}
+
+        {{if .AccessTokens}}
+          <ul class="group-list">
+            {{range .AccessTokens}}
+              <li>
+                <strong>{{.Category}} token</strong>
+                <span>Created: <time data-created-at="{{.CreatedAt}}">{{.CreatedAt}}</time></span>
+                <span>Expires: <time data-created-at="{{.ExpiresAt}}">{{.ExpiresAt}}</time></span>
+                {{if .Rules}}
+                  <div class="token-rules">
+                    {{range .Rules}}
+                      <p>Group {{.GroupID}} | States: {{.Statuses}} | Past: {{if .IncludePast}}yes{{else}}no{{end}}</p>
+                    {{end}}
+                  </div>
+                {{else}}
+                  <span>No rules available.</span>
+                {{end}}
+                <form method="post" action="/profile/access-tokens/{{.ID}}/delete" onsubmit="return confirm('Delete this access token?');">
+                  <button type="submit" class="nav-logout">Delete token</button>
+                </form>
+              </li>
+            {{end}}
+          </ul>
+        {{else}}
+          <p class="empty-events">No access tokens created yet.</p>
+        {{end}}
+      </section>
+
+      <section class="groups">
         <h2>Advanced</h2>
         <p class="empty-events">Inspect token state and trigger a manual refresh-token promotion.</p>
         <div class="filter-actions">
@@ -129,6 +171,28 @@
           renderError('Refresh tokens', err);
         }
       }
+
+      var dateItems = document.querySelectorAll('time[data-created-at]');
+      dateItems.forEach(function (el) {
+        var iso = el.getAttribute('data-created-at');
+        if (!iso || iso === '-' || iso === 'Never') {
+          return;
+        }
+
+        var date = new Date(iso);
+        if (isNaN(date.getTime())) {
+          return;
+        }
+
+        el.textContent = date.toLocaleString(undefined, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        });
+      });
 
       loadButton.addEventListener('click', loadTokens);
       refreshButton.addEventListener('click', refreshTokens);

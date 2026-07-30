@@ -1,9 +1,11 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,7 @@ func newTestServer(t *testing.T, cfg config.Config) *Server {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	server, err := NewServer(cfg, h, NewMemoryUserTokenStore(), NewMemoryEventSyncStore())
+	server, err := NewServer(cfg, h, NewMemoryUserTokenStore(), NewMemoryEventSyncStore(), NewMemoryAccessTokenStore())
 	if err != nil {
 		t.Fatalf("new web server: %v", err)
 	}
@@ -32,6 +34,11 @@ func newTestServer(t *testing.T, cfg config.Config) *Server {
 }
 
 func newTestServerWithSyncStore(t *testing.T, cfg config.Config, syncStore EventSyncStore) *Server {
+	t.Helper()
+	return newTestServerWithStores(t, cfg, syncStore, NewMemoryAccessTokenStore())
+}
+
+func newTestServerWithStores(t *testing.T, cfg config.Config, syncStore EventSyncStore, accessTokenStore AccessTokenStore) *Server {
 	t.Helper()
 	if cfg.CookieSecret == "" {
 		cfg.CookieSecret = "test-cookie-secret"
@@ -42,7 +49,7 @@ func newTestServerWithSyncStore(t *testing.T, cfg config.Config, syncStore Event
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	server, err := NewServer(cfg, h, NewMemoryUserTokenStore(), syncStore)
+	server, err := NewServer(cfg, h, NewMemoryUserTokenStore(), syncStore, accessTokenStore)
 	if err != nil {
 		t.Fatalf("new web server: %v", err)
 	}
@@ -56,7 +63,7 @@ func TestNewServerRequiresCookieSecret(t *testing.T) {
 		t.Fatalf("new caldav handler: %v", err)
 	}
 
-	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h, NewMemoryUserTokenStore(), NewMemoryEventSyncStore())
+	_, err = NewServer(config.Config{Addr: ":9090", CookieSecret: ""}, h, NewMemoryUserTokenStore(), NewMemoryEventSyncStore(), NewMemoryAccessTokenStore())
 	if err == nil {
 		t.Fatal("expected NewServer to require cookie secret")
 	}
@@ -351,6 +358,118 @@ func TestEventsSyncNowRunsAndReturnsSchedule(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "sync completed") || !strings.Contains(body, "eventCount") || !strings.Contains(body, "nextSyncAt") {
 		t.Fatalf("expected sync payload fields, got %q", body)
+	}
+}
+
+func TestCreateAccessTokenRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodPost, "/api/profile/access-tokens", strings.NewReader(`{"category":"ical","groups":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/signin" {
+		t.Fatalf("expected redirect to /signin, got %q", location)
+	}
+}
+
+func TestCreateAccessTokenAndScopedExport(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]},
+				{"id":"G2","name":"Team B","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}
+			]`))
+		case "/sponds/":
+			if got := r.Header.Get("Authorization"); got != "Bearer TOKEN123" {
+				t.Fatalf("expected bearer token header, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"EVT1","heading":"Accepted in Team A","groupId":"G1","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+				{"id":"EVT2","heading":"Declined in Team A","groupId":"G1","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"declinedIds":["MEMBER1"]}},
+				{"id":"EVT3","heading":"Accepted in Team B","groupId":"G2","startTimestamp":"2099-05-28T18:00:00Z","endTimestamp":"2099-05-28T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}},
+				{"id":"EVT4","heading":"Past Accepted in Team A","groupId":"G1","startTimestamp":"2001-05-28T18:00:00Z","endTimestamp":"2001-05-28T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+			]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServerWithStores(
+		t,
+		config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL},
+		NewMemoryEventSyncStore(),
+		NewMemoryAccessTokenStore(),
+	)
+	cookie := signinAndGetSessionCookie(t, server)
+
+	createBody := `{"category":"ical","groups":[{"groupId":"G1","statuses":["0"],"includePast":true}]}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/profile/access-tokens", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(cookie)
+	createRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusOK, createRec.Code, createRec.Body.String())
+	}
+
+	var payload struct {
+		Token     string `json:"token"`
+		ExportURL string `json:"exportURL"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal create token payload: %v", err)
+	}
+	if payload.Token == "" || payload.ExportURL == "" {
+		t.Fatalf("expected token and export url, got %+v", payload)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, payload.ExportURL, nil)
+	exportRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(exportRec, exportReq)
+
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusOK, exportRec.Code, exportRec.Body.String())
+	}
+
+	ics := exportRec.Body.String()
+	if !strings.Contains(ics, "SUMMARY:Accepted in Team A") {
+		t.Fatalf("expected scoped accepted event from Team A, got %q", ics)
+	}
+
+	if !strings.Contains(ics, "SUMMARY:Past Accepted in Team A") {
+		t.Fatalf("expected past event when includePast is true, got %q", ics)
+	}
+
+	if strings.Contains(ics, "SUMMARY:Declined in Team A") {
+		t.Fatalf("did not expect declined events for accepted-only scope, got %q", ics)
+	}
+
+	if strings.Contains(ics, "SUMMARY:Accepted in Team B") {
+		t.Fatalf("did not expect events from non-scoped group, got %q", ics)
 	}
 }
 
@@ -704,6 +823,256 @@ func TestProfileRouteRendersForAuthenticatedSession(t *testing.T) {
 
 	if !strings.Contains(body, "Show token state") || !strings.Contains(body, "Refresh now") {
 		t.Fatalf("expected advanced token controls in profile page, got %q", body)
+	}
+
+	if !strings.Contains(body, "Access tokens") || !strings.Contains(body, "Create token") {
+		t.Fatalf("expected access token section in profile page, got %q", body)
+	}
+}
+
+func TestAccessTokensPageRequiresSession(t *testing.T) {
+	server := newTestServer(t, config.Config{Addr: ":9090"})
+	req := httptest.NewRequest(http.MethodGet, "/profile/access-tokens", nil)
+	rec := httptest.NewRecorder()
+
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "/profile" {
+		t.Fatalf("expected redirect to /profile, got %q", location)
+	}
+}
+
+func TestAccessTokenCreatePageRendersGroups(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	req := httptest.NewRequest(http.MethodGet, "/profile/access-tokens/new", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Create iCal access token") || !strings.Contains(body, "Team Alpha") {
+		t.Fatalf("expected token create page and group rules, got %q", body)
+	}
+
+	if !strings.Contains(body, "value=\"accepted\"") || !strings.Contains(body, "Include past events") {
+		t.Fatalf("expected status and past-event checkboxes, got %q", body)
+	}
+}
+
+func TestAccessTokenCreatePostRedirectsAndShowsCreatedToken(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	form := url.Values{}
+	form.Add("group", "G1")
+	form.Add("status__G1", "accepted")
+	form.Add("status__G1", "unanswered")
+	form.Set("past__G1", "1")
+
+	req := httptest.NewRequest(http.MethodPost, "/profile/access-tokens/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+
+	location := rec.Header().Get("Location")
+	if !strings.HasPrefix(location, "/profile?createdToken=") {
+		t.Fatalf("expected redirect with created token, got %q", location)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, location, nil)
+	listReq.AddCookie(cookie)
+	listRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listRec.Code)
+	}
+
+	body := listRec.Body.String()
+	if !strings.Contains(body, "Token created. This is shown only once.") || !strings.Contains(body, "Group G1") {
+		t.Fatalf("expected created token and rule summary in list page, got %q", body)
+	}
+}
+
+func TestAccessTokenDeleteFromProfile(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	form := url.Values{}
+	form.Add("group", "G1")
+	form.Add("status__G1", "accepted")
+	req := httptest.NewRequest(http.MethodPost, "/profile/access-tokens/new", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(rec, req)
+
+	memoryStore, ok := server.accessTokens.(*MemoryAccessTokenStore)
+	if !ok {
+		t.Fatal("expected memory access token store")
+	}
+	records, err := memoryStore.ListAccessTokensByUserID(req.Context(), 1)
+	if err != nil {
+		t.Fatalf("list tokens: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one token, got %d", len(records))
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodPost, "/profile/access-tokens/"+strconv.FormatUint(uint64(records[0].ID), 10)+"/delete", nil)
+	deleteReq.AddCookie(cookie)
+	deleteRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(deleteRec, deleteReq)
+
+	if deleteRec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, deleteRec.Code)
+	}
+
+	remaining, err := memoryStore.ListAccessTokensByUserID(req.Context(), 1)
+	if err != nil {
+		t.Fatalf("list remaining tokens: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected zero tokens after delete, got %d", len(remaining))
+	}
+}
+
+func TestExpiredAccessTokenIsRejectedAndDeletedOnExport(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":"G1","name":"Team Alpha","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}]`))
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServer(t, config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL})
+	cookie := signinAndGetSessionCookie(t, server)
+
+	expiresAt := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	createBody := `{"category":"ical","expiresAt":"` + expiresAt + `","groups":[{"groupId":"G1","statuses":["accepted"],"includePast":false}]}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/profile/access-tokens", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(cookie)
+	createRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, createRec.Code)
+	}
+
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/events.ics?access_token="+url.QueryEscape(payload.Token), nil)
+	exportRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(exportRec, exportReq)
+
+	if exportRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, exportRec.Code)
+	}
+
+	memoryStore, ok := server.accessTokens.(*MemoryAccessTokenStore)
+	if !ok {
+		t.Fatal("expected memory access token store")
+	}
+	remaining, err := memoryStore.ListAccessTokensByUserID(exportReq.Context(), 1)
+	if err != nil {
+		t.Fatalf("list remaining tokens: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected expired token to be removed, got %d token(s)", len(remaining))
 	}
 }
 

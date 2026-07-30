@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Spond WebCAL - Access Tokens</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="page-account page-profile page-access-tokens">
+  <div class="page-shell">
+    <nav class="top-nav">
+      <div class="top-nav__links">
+        <a href="/">Events</a>
+        <a href="/profile">Profile</a>
+        <a class="active" href="/profile/access-tokens">Access tokens</a>
+      </div>
+      <form method="post" action="/logout">
+        <button class="nav-logout" type="submit">Logout</button>
+      </form>
+    </nav>
+
+    <main class="card">
+      <h1>Access tokens</h1>
+      <p class="empty-events">Create scoped iCal export tokens and review existing permissions.</p>
+
+      <div class="filter-actions">
+        <a href="/profile/access-tokens/new">Create token</a>
+      </div>
+
+      {{if .CreatedToken}}
+        <section class="groups">
+          <h2>Created token</h2>
+          <p class="empty-events">Save this token where needed for calendar clients.</p>
+          <pre id="access-token-output">{{.CreatedToken}}</pre>
+          <p><a href="{{.CreatedExportURL}}">Open export URL</a></p>
+        </section>
+      {{end}}
+
+      <section class="groups">
+        <h2>Token list</h2>
+        {{if .Tokens}}
+          <ul class="group-list">
+            {{range .Tokens}}
+              <li>
+                <strong>{{.Category}} token</strong>
+                <span>Created: <time data-created-at="{{.CreatedAt}}">{{.CreatedAt}}</time></span>
+                <span>Token: {{.Token}}</span>
+                <span>Export: <a href="{{.ExportURL}}">{{.ExportURL}}</a></span>
+                {{if .Rules}}
+                  <div class="token-rules">
+                    {{range .Rules}}
+                      <p>
+                        Group {{.GroupID}} | Statuses: {{.Statuses}} | Past: {{if .IncludePast}}yes{{else}}no{{end}}
+                      </p>
+                    {{end}}
+                  </div>
+                {{else}}
+                  <span>No rules available.</span>
+                {{end}}
+              </li>
+            {{end}}
+          </ul>
+        {{else}}
+          <p class="empty-events">No access tokens created yet.</p>
+        {{end}}
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var items = document.querySelectorAll('time[data-created-at]');
+      items.forEach(function (el) {
+        var iso = el.getAttribute('data-created-at');
+        if (!iso || iso === '-') {
+          return;
+        }
+
+        var date = new Date(iso);
+        if (isNaN(date.getTime())) {
+          return;
+        }
+
+        el.textContent = date.toLocaleString(undefined, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

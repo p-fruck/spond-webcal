@@ -35,6 +35,7 @@ func main() {
 
 	userTokenStore := db.NewUserTokenStore(database)
 	cacheStore := db.NewSpondCacheStore(database)
+	accessTokenStore := db.NewAccessTokenStore(database)
 
 	worker, err := syncworker.NewEventsWorker(
 		userTokenStore,
@@ -53,7 +54,7 @@ func main() {
 	worker.Start(workerCtx)
 	log.Printf("events sync worker enabled (interval=%s timeout=%s)", cfg.SyncInterval, cfg.SyncTimeout)
 
-	server, err := web.NewServer(cfg, caldavHandler, userTokenStore, cacheStore)
+	server, err := web.NewServer(cfg, caldavHandler, userTokenStore, cacheStore, accessTokenStore)
 	if err != nil {
 		log.Fatal(err)
 	}

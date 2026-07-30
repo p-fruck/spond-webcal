@@ -43,12 +43,15 @@ const (
 )
 
 type profilePageData struct {
-	Name       string
-	Email      string
-	ProfileID  string
-	GroupCount int
-	ActorIDs   []string
-	Groups     []groupSummaryData
+	Name             string
+	Email            string
+	ProfileID        string
+	GroupCount       int
+	ActorIDs         []string
+	Groups           []groupSummaryData
+	AccessTokens     []accessTokenListItem
+	CreatedToken     string
+	CreatedExportURL string
 }
 
 type eventViewData struct {

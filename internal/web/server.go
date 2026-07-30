@@ -1,10 +1,15 @@
 package web
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,20 +21,25 @@ import (
 )
 
 type Server struct {
-	e         *echo.Echo
-	templates *template.Template
-	cfg       config.Config
-	userStore UserTokenStore
-	syncStore EventSyncStore
+	e            *echo.Echo
+	templates    *template.Template
+	cfg          config.Config
+	userStore    UserTokenStore
+	syncStore    EventSyncStore
+	accessTokens AccessTokenStore
 }
 
-func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserTokenStore, syncStore EventSyncStore) (*Server, error) {
+func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserTokenStore, syncStore EventSyncStore, accessTokens AccessTokenStore) (*Server, error) {
 	if strings.TrimSpace(cfg.CookieSecret) == "" {
 		return nil, fmt.Errorf("SPOND_WEBCAL_COOKIE_SECRET is required")
 	}
 
 	if userStore == nil {
 		return nil, fmt.Errorf("user token store is required")
+	}
+
+	if accessTokens == nil {
+		return nil, fmt.Errorf("access token store is required")
 	}
 
 	e := echo.New()
@@ -50,14 +60,19 @@ func NewServer(cfg config.Config, caldavHandler http.Handler, userStore UserToke
 		})
 	})
 
-	s := &Server{e: e, templates: templates, cfg: cfg, userStore: userStore, syncStore: syncStore}
+	s := &Server{e: e, templates: templates, cfg: cfg, userStore: userStore, syncStore: syncStore, accessTokens: accessTokens}
 
 	e.GET("/", s.handleEventsPage)
 	e.GET("/events.ics", s.handleEventsExport)
 	e.GET("/signin", s.handleSigninPage)
 	e.POST("/signin", s.handleSigninPost)
 	e.GET("/profile", s.handleProfilePage)
+	e.GET("/profile/access-tokens", s.handleAccessTokensPage)
+	e.GET("/profile/access-tokens/new", s.handleAccessTokenCreatePage)
+	e.POST("/profile/access-tokens/new", s.handleAccessTokenCreatePost)
+	e.POST("/profile/access-tokens/:tokenID/delete", s.handleAccessTokenDeletePost)
 	e.POST("/api/events/sync", s.handleEventsSyncNowAPI)
+	e.POST("/api/profile/access-tokens", s.handleCreateAccessTokenAPI)
 	e.POST("/api/profile/tokens/reveal", s.handleProfileTokensAPI)
 	e.POST("/api/profile/tokens/refresh", s.handleProfileTokensRefreshAPI)
 	e.GET("/groups/:groupID", s.handleGroupDetailPage)
@@ -137,6 +152,11 @@ func (s *Server) handleEventsSyncNowAPI(c echo.Context) error {
 }
 
 func (s *Server) handleEventsExport(c echo.Context) error {
+	accessToken := strings.TrimSpace(c.QueryParam("access_token"))
+	if accessToken != "" {
+		return s.handleEventsExportForAccessToken(c, accessToken)
+	}
+
 	session, ok := s.readSession(c)
 	if !ok {
 		return c.Redirect(http.StatusSeeOther, "/signin")
@@ -155,6 +175,70 @@ func (s *Server) handleEventsExport(c echo.Context) error {
 	includePast := parseBoolQueryParam(c.QueryParam("includePast"), false)
 	events := mergedSortedEvents(data.UpcomingEvents, includePastEvents(data.PastEvents, includePast))
 	ics := buildICSCalendar(events, time.Now().UTC())
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/calendar; charset=utf-8")
+	c.Response().Header().Set("Content-Disposition", "attachment; filename=events.ics")
+	return c.String(http.StatusOK, ics)
+}
+
+func (s *Server) handleEventsExportForAccessToken(c echo.Context, token string) error {
+	record, err := s.accessTokens.AccessTokenByToken(c.Request().Context(), token)
+	if err != nil {
+		return c.String(http.StatusUnauthorized, "invalid access token")
+	}
+
+	if isAccessTokenExpiredAt(record.ExpiresAt, time.Now().UTC()) {
+		_ = s.accessTokens.DeleteAccessTokenByToken(c.Request().Context(), record.Token)
+		return c.String(http.StatusUnauthorized, "access token expired")
+	}
+
+	if strings.TrimSpace(strings.ToLower(record.Category)) != accessTokenCategoryICal {
+		return c.String(http.StatusForbidden, "access token category is not allowed for iCal export")
+	}
+
+	var scope iCalAccessScope
+	if err := json.Unmarshal([]byte(record.Scope), &scope); err != nil {
+		return c.String(http.StatusInternalServerError, "invalid access token scope")
+	}
+
+	groupIDs := make([]string, 0, len(scope.Groups))
+	seen := map[string]struct{}{}
+	for _, group := range scope.Groups {
+		groupID := strings.TrimSpace(group.GroupID)
+		if groupID == "" {
+			continue
+		}
+		if _, ok := seen[groupID]; ok {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		groupIDs = append(groupIDs, groupID)
+	}
+	if len(groupIDs) == 0 {
+		return c.String(http.StatusForbidden, "access token does not allow any groups")
+	}
+
+	client, err := s.spondClientForUserID(c, record.UserID)
+	if err != nil {
+		return c.String(http.StatusUnauthorized, "failed to load user token")
+	}
+
+	groups, err := client.FetchGroups(c.Request().Context())
+	if err != nil {
+		return c.String(http.StatusBadGateway, "failed to load groups")
+	}
+
+	events, err := client.FetchEventsForGroups(c.Request().Context(), 200, groupIDs)
+	if err != nil {
+		return c.String(http.StatusBadGateway, "failed to load events")
+	}
+
+	groupNamesByID := buildGroupNamesByID(groups)
+	subGroupParentByID := buildSubGroupParentByID(groups)
+	upcomingEvents, pastEvents := buildEventViewData(events, scope.ActorIDs, groupNamesByID, subGroupParentByID, time.Now().UTC())
+
+	allowedEvents := filterEventsByICalScope(upcomingEvents, pastEvents, scope)
+	ics := buildICSCalendar(allowedEvents, time.Now().UTC())
 
 	c.Response().Header().Set(echo.HeaderContentType, "text/calendar; charset=utf-8")
 	c.Response().Header().Set("Content-Disposition", "attachment; filename=events.ics")
@@ -318,16 +402,154 @@ func (s *Server) handleProfilePage(c echo.Context) error {
 		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
 	}
 
+	if _, err := s.accessTokens.DeleteExpiredAccessTokensByUserID(c.Request().Context(), session.UserID, time.Now().UTC()); err != nil {
+		return c.String(http.StatusInternalServerError, "failed to clean expired access tokens")
+	}
+
+	records, err := s.accessTokens.ListAccessTokensByUserID(c.Request().Context(), session.UserID)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to list access tokens")
+	}
+
+	createdToken := strings.TrimSpace(c.QueryParam("createdToken"))
+
 	data := profilePageData{
-		Name:       session.Name,
-		Email:      session.Email,
-		ProfileID:  session.ProfileID,
-		GroupCount: len(groups),
-		ActorIDs:   session.ActorIDs,
-		Groups:     buildGroupSummaryData(groups),
+		Name:             session.Name,
+		Email:            session.Email,
+		ProfileID:        session.ProfileID,
+		GroupCount:       len(groups),
+		ActorIDs:         session.ActorIDs,
+		Groups:           buildGroupSummaryData(groups),
+		AccessTokens:     buildAccessTokenListItems(records),
+		CreatedToken:     createdToken,
+		CreatedExportURL: "",
+	}
+	if createdToken != "" {
+		data.CreatedExportURL = "/events.ics?access_token=" + createdToken
 	}
 
 	return s.renderTemplate(c, "profile.html", data)
+}
+
+func (s *Server) handleAccessTokensPage(c echo.Context) error {
+	query := ""
+	if createdToken := strings.TrimSpace(c.QueryParam("created")); createdToken != "" {
+		query = "?createdToken=" + url.QueryEscape(createdToken)
+	}
+
+	return c.Redirect(http.StatusSeeOther, "/profile"+query)
+}
+
+func (s *Server) handleAccessTokenCreatePage(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	client, shouldClearSession, err := s.spondClientForSession(c, session)
+	if err != nil {
+		if shouldClearSession {
+			s.clearSession(c)
+			return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+		}
+
+		return c.String(http.StatusInternalServerError, "failed to initialize spond client")
+	}
+
+	groups, err := client.FetchGroups(c.Request().Context())
+	if err != nil {
+		s.clearSession(c)
+		return c.Redirect(http.StatusSeeOther, "/signin?error=session")
+	}
+
+	data := accessTokenCreatePageData{
+		Name:       session.Name,
+		Email:      session.Email,
+		Groups:     buildGroupSummaryData(groups),
+		Error:      strings.TrimSpace(c.QueryParam("error")),
+		Expiration: strings.TrimSpace(c.QueryParam("expiresAt")),
+	}
+
+	return s.renderTemplate(c, "access_token_new.html", data)
+}
+
+func (s *Server) handleAccessTokenCreatePost(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	formValues, formErr := c.FormParams()
+	if formErr != nil {
+		return c.Redirect(http.StatusSeeOther, "/profile/access-tokens/new?error=Failed+to+read+form")
+	}
+
+	groups := parseCompactFilterValues(formValues, "group")
+	if len(groups) == 0 {
+		return c.Redirect(http.StatusSeeOther, "/profile/access-tokens/new?error=Select+at+least+one+group")
+	}
+
+	rules := make([]createAccessTokenGroup, 0, len(groups))
+	for _, groupID := range groups {
+		statuses := parseCompactFilterValues(formValues, "status__"+groupID)
+		if len(statuses) == 0 {
+			return c.Redirect(http.StatusSeeOther, "/profile/access-tokens/new?error=Each+selected+group+requires+at+least+one+status")
+		}
+
+		rules = append(rules, createAccessTokenGroup{
+			GroupID:     groupID,
+			Statuses:    statuses,
+			IncludePast: formValues.Get("past__"+groupID) == "1",
+		})
+	}
+
+	expiresAt, err := parseOptionalAccessTokenExpiration(formValues.Get("expiresAt"))
+	if err != nil {
+		return c.Redirect(http.StatusSeeOther, "/profile/access-tokens/new?error="+url.QueryEscape(err.Error())+"&expiresAt="+url.QueryEscape(formValues.Get("expiresAt")))
+	}
+
+	category, scope, err := normalizeCreateAccessTokenRequest(createAccessTokenRequest{
+		Category: accessTokenCategoryICal,
+		Groups:   rules,
+	}, session.ActorIDs)
+	if err != nil {
+		return c.Redirect(http.StatusSeeOther, "/profile/access-tokens/new?error="+url.QueryEscape(err.Error()))
+	}
+
+	scopeJSON, err := json.Marshal(scope)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to encode scope")
+	}
+
+	token, err := generateAccessToken()
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to generate access token")
+	}
+
+	if err := s.accessTokens.CreateAccessToken(c.Request().Context(), session.UserID, token, category, string(scopeJSON), expiresAt); err != nil {
+		return c.String(http.StatusInternalServerError, "failed to store access token")
+	}
+
+	return c.Redirect(http.StatusSeeOther, "/profile?createdToken="+url.QueryEscape(token))
+}
+
+func (s *Server) handleAccessTokenDeletePost(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	tokenIDValue := strings.TrimSpace(c.Param("tokenID"))
+	tokenID, err := strconv.ParseUint(tokenIDValue, 10, 64)
+	if err != nil || tokenID == 0 {
+		return c.Redirect(http.StatusSeeOther, "/profile")
+	}
+
+	if err := s.accessTokens.DeleteAccessTokenByID(c.Request().Context(), session.UserID, uint(tokenID)); err != nil {
+		return c.String(http.StatusBadRequest, "failed to delete access token")
+	}
+
+	return c.Redirect(http.StatusSeeOther, "/profile")
 }
 
 func (s *Server) handleProfileTokensAPI(c echo.Context) error {
@@ -343,6 +565,50 @@ func (s *Server) handleProfileTokensAPI(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, tokens)
+}
+
+func (s *Server) handleCreateAccessTokenAPI(c echo.Context) error {
+	session, ok := s.readSession(c)
+	if !ok {
+		return c.Redirect(http.StatusSeeOther, "/signin")
+	}
+
+	var requestPayload createAccessTokenRequest
+	if err := c.Bind(&requestPayload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+
+	category, scope, err := normalizeCreateAccessTokenRequest(requestPayload, session.ActorIDs)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	expiresAt, err := parseOptionalAccessTokenExpiration(requestPayload.ExpiresAt)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	scopeJSON, err := json.Marshal(scope)
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to encode scope")
+	}
+
+	token, err := generateAccessToken()
+	if err != nil {
+		return c.String(http.StatusInternalServerError, "failed to generate access token")
+	}
+
+	if err := s.accessTokens.CreateAccessToken(c.Request().Context(), session.UserID, token, category, string(scopeJSON), expiresAt); err != nil {
+		return c.String(http.StatusInternalServerError, "failed to store access token")
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"token":     token,
+		"category":  category,
+		"groups":    scope.Groups,
+		"expiresAt": requestPayload.ExpiresAt,
+		"exportURL": "/events.ics?access_token=" + token,
+	})
 }
 
 func (s *Server) handleProfileTokensRefreshAPI(c echo.Context) error {
@@ -496,6 +762,33 @@ func parseBoolQueryParam(value string, defaultValue bool) bool {
 	}
 }
 
+func parseOptionalAccessTokenExpiration(value string) (*time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	parsed, err := time.Parse("2006-01-02T15:04", trimmed)
+	if err != nil {
+		if parsedRFC3339, errRFC3339 := time.Parse(time.RFC3339, trimmed); errRFC3339 == nil {
+			parsed = parsedRFC3339
+		} else {
+			return nil, fmt.Errorf("invalid expiration date format")
+		}
+	}
+
+	utc := parsed.UTC()
+	return &utc, nil
+}
+
+func isAccessTokenExpiredAt(expiresAt *time.Time, now time.Time) bool {
+	if expiresAt == nil {
+		return false
+	}
+
+	return !expiresAt.After(now.UTC())
+}
+
 func (s *Server) addSyncStatusToAccountPageData(c echo.Context, userID uint, data *accountPageData) {
 	data.SyncEnabled = s.syncStore != nil
 	if !data.SyncEnabled {
@@ -589,6 +882,30 @@ func (s *Server) spondClientForSession(c echo.Context, session authSession) (*sp
 	client.SetToken(token)
 
 	return client, false, nil
+}
+
+func (s *Server) spondClientForUserID(c echo.Context, userID uint) (*spond.Client, error) {
+	token, err := s.userStore.TokenByUserID(c.Request().Context(), userID)
+	if err != nil {
+		return nil, fmt.Errorf("load user token: %w", err)
+	}
+
+	client, err := spond.New(s.cfg.SpondBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	client.SetToken(token)
+
+	return client, nil
+}
+
+func generateAccessToken() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func (s *Server) tokenPayloadForUser(c echo.Context, userID uint) (map[string]any, error) {
