@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"code.p-fruck.eu/spond-webcal/internal/api"
 	"code.p-fruck.eu/spond-webcal/internal/db"
 )
 
@@ -27,6 +28,7 @@ type accessTokenListItem struct {
 
 type accessTokenRuleView struct {
 	GroupID     string
+	GroupName   string
 	Statuses    string
 	IncludePast bool
 }
@@ -39,7 +41,8 @@ type accessTokenCreatePageData struct {
 	Expiration string
 }
 
-func buildAccessTokenListItems(records []db.AccessTokenRecord) []accessTokenListItem {
+func buildAccessTokenListItems(records []db.AccessTokenRecord, groups []api.Group) []accessTokenListItem {
+	groupNamesByID := buildGroupNamesByID(groups)
 	items := make([]accessTokenListItem, 0, len(records))
 	for _, record := range records {
 		rules := []accessTokenRuleView{}
@@ -53,8 +56,14 @@ func buildAccessTokenListItems(records []db.AccessTokenRecord) []accessTokenList
 						statuses = append(statuses, statusLabelFromKey(status))
 					}
 
+					groupName := strings.TrimSpace(groupNamesByID[groupRule.GroupID])
+					if groupName == "" {
+						groupName = groupRule.GroupID
+					}
+
 					rules = append(rules, accessTokenRuleView{
 						GroupID:     groupRule.GroupID,
+						GroupName:   groupName,
 						Statuses:    strings.Join(statuses, ", "),
 						IncludePast: groupRule.IncludePast,
 					})

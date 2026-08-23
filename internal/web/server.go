@@ -420,7 +420,7 @@ func (s *Server) handleProfilePage(c echo.Context) error {
 		GroupCount:       len(groups),
 		ActorIDs:         session.ActorIDs,
 		Groups:           buildGroupSummaryData(groups),
-		AccessTokens:     buildAccessTokenListItems(records),
+		AccessTokens:     buildAccessTokenListItems(records, groups),
 		CreatedToken:     createdToken,
 		CreatedExportURL: "",
 	}

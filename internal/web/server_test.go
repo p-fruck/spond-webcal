@@ -473,6 +473,88 @@ func TestCreateAccessTokenAndScopedExport(t *testing.T) {
 	}
 }
 
+func TestAccessTokenExportIncludesEventsWhenGroupIDIsOmittedByAPI(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth2/login":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"accessToken":{"token":"TOKEN123"}}`))
+		case "/profile":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"PROFILE1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}`))
+		case "/groups/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id":"G1","name":"Team A","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]},
+				{"id":"G2","name":"Team B","members":[{"id":"MEMBER1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com"}]}
+			]`))
+		case "/sponds/":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			switch r.URL.Query().Get("groupId") {
+			case "G1":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT1","heading":"Accepted in Team A","startTimestamp":"2099-05-26T18:00:00Z","endTimestamp":"2099-05-26T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			case "G2":
+				_, _ = w.Write([]byte(`[
+					{"id":"EVT2","heading":"Accepted in Team B","startTimestamp":"2099-05-27T18:00:00Z","endTimestamp":"2099-05-27T19:00:00Z","responses":{"acceptedIds":["MEMBER1"]}}
+				]`))
+			default:
+				_, _ = w.Write([]byte(`[]`))
+			}
+		default:
+			t.Fatalf("unexpected API path: %s", r.URL.Path)
+		}
+	}))
+	defer apiServer.Close()
+
+	server := newTestServerWithStores(
+		t,
+		config.Config{Addr: ":9090", SpondBaseURL: apiServer.URL},
+		NewMemoryEventSyncStore(),
+		NewMemoryAccessTokenStore(),
+	)
+	cookie := signinAndGetSessionCookie(t, server)
+
+	createBody := `{"category":"ical","groups":[{"groupId":"G1","statuses":["accepted"],"includePast":false}]}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/profile/access-tokens", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(cookie)
+	createRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusOK, createRec.Code, createRec.Body.String())
+	}
+
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal create token payload: %v", err)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/events.ics?access_token="+url.QueryEscape(payload.Token), nil)
+	exportRec := httptest.NewRecorder()
+	server.Echo().ServeHTTP(exportRec, exportReq)
+
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %q", http.StatusOK, exportRec.Code, exportRec.Body.String())
+	}
+
+	ics := exportRec.Body.String()
+	if !strings.Contains(ics, "SUMMARY:Accepted in Team A") {
+		t.Fatalf("expected accepted event from selected group despite missing groupId in API payload, got %q", ics)
+	}
+	if strings.Contains(ics, "SUMMARY:Accepted in Team B") {
+		t.Fatalf("did not expect event from unselected group, got %q", ics)
+	}
+}
+
 func TestEventsExportRequiresSession(t *testing.T) {
 	server := newTestServer(t, config.Config{Addr: ":9090"})
 	req := httptest.NewRequest(http.MethodGet, "/events.ics", nil)
@@ -944,8 +1026,8 @@ func TestAccessTokenCreatePostRedirectsAndShowsCreatedToken(t *testing.T) {
 	}
 
 	body := listRec.Body.String()
-	if !strings.Contains(body, "Token created. This is shown only once.") || !strings.Contains(body, "Group G1") {
-		t.Fatalf("expected created token and rule summary in list page, got %q", body)
+	if !strings.Contains(body, "Token created. This is shown only once.") || !strings.Contains(body, "Group Team Alpha") {
+		t.Fatalf("expected created token and human-readable group rule summary in list page, got %q", body)
 	}
 }
 
