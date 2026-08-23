@@ -113,6 +113,12 @@ func (c *Client) FetchEventsForGroups(ctx context.Context, maxEvents int, groupI
 			return nil, err
 		}
 
+		for i := range events {
+			if events[i].GroupId == nil && events[i].SubGroupId == nil {
+				events[i].GroupId = &currentGroupID
+			}
+		}
+
 		for _, event := range events {
 			if strings.TrimSpace(event.Id) == "" {
 				combined = append(combined, event)
