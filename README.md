@@ -51,6 +51,12 @@ SPOND_WEBCAL_LOG_LEVEL="info"                               # Log level
 SPOND_WEBCAL_SPOND_BASE_URL="https://api.spond.com/core/v1" # Spond API base URL
 ```
 
+There is also a container image available:
+
+```bash
+podman run --rm -v ./data:/data:z -e SPOND_WEBCAL_DB_URL=file:/data/app.db -e SPOND_WEBCAL_COOKIE_SECRET=securesecret -e SPOND_WEBCAL_ADDR=":8080" -p 8080:8080 ghcr.io/p-fruck/spond-webcal:main
+```
+
 See the [developer docs](docs/dev.md) for detailed architecture and developer guide.
 
 ## Known Limitations
