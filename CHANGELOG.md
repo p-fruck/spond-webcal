@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/p-fruck/spond-webcal/compare/v1.0.0...v1.0.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* **container:** build with cgo enabled to make sqlite driver work ([#3](https://github.com/p-fruck/spond-webcal/issues/3)) ([cf500ad](https://github.com/p-fruck/spond-webcal/commit/cf500adb4b810d53cad5630152803cfe34e2a746))
+
 ## 1.0.0 (2026-07-30)
 
 
