@@ -2,6 +2,10 @@ FROM docker.io/library/golang:1.25-alpine AS builder
 
 WORKDIR /src
 
+# currently required for sqlite implementation
+RUN apk add --no-cache gcc musl-dev
+ENV CGO_ENABLED=1
+
 # Install CA certificates once so we can copy them into the scratch image.
 RUN apk add --no-cache ca-certificates
 
@@ -20,8 +24,11 @@ RUN go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 -pack
 COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags='-s -w' -o /out/spond-webcal ./cmd/spond-webcal
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build \
+      -trimpath -ldflags='-s -w -linkmode external -extldflags "-static"' \
+      -tags sqlite_omit_load_extension \
+      -o /out/spond-webcal ./cmd/spond-webcal
 
 FROM scratch
 
