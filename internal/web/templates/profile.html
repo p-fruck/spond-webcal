@@ -90,7 +90,7 @@
                 {{if .Rules}}
                   <div class="token-rules">
                     {{range .Rules}}
-                      <p>Group {{.GroupID}} | States: {{.Statuses}} | Past: {{if .IncludePast}}yes{{else}}no{{end}}</p>
+                      <p>Group {{.GroupName}} | States: {{.Statuses}} | Past: {{if .IncludePast}}yes{{else}}no{{end}}</p>
                     {{end}}
                   </div>
                 {{else}}

@@ -1026,8 +1026,8 @@ func TestAccessTokenCreatePostRedirectsAndShowsCreatedToken(t *testing.T) {
 	}
 
 	body := listRec.Body.String()
-	if !strings.Contains(body, "Token created. This is shown only once.") || !strings.Contains(body, "Group G1") {
-		t.Fatalf("expected created token and rule summary in list page, got %q", body)
+	if !strings.Contains(body, "Token created. This is shown only once.") || !strings.Contains(body, "Group Team Alpha") {
+		t.Fatalf("expected created token and human-readable group rule summary in list page, got %q", body)
 	}
 }
 
