@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/p-fruck/spond-webcal/compare/v1.0.1...v1.0.2) (2026-08-23)
+
+
+### Bug Fixes
+
+* **ical:** add implicit group id to token export  ([#5](https://github.com/p-fruck/spond-webcal/issues/5)) ([5136237](https://github.com/p-fruck/spond-webcal/commit/5136237038f0fbd10221e4219518cf3d47794818))
+
 ## [1.0.1](https://github.com/p-fruck/spond-webcal/compare/v1.0.0...v1.0.1) (2026-08-23)
 
 
