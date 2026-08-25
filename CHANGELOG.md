@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3-rc.2](https://github.com/p-fruck/spond-webcal/compare/v1.0.3-rc.1...v1.0.3-rc.2) (2026-08-25)
+
+
+### Continuous Integration
+
+* revert custom trigger ([#7](https://github.com/p-fruck/spond-webcal/issues/7)), add release token ([c7891f0](https://github.com/p-fruck/spond-webcal/commit/c7891f000d52a9385601cdbde6f896c332a6d14f))
+
 ## [1.0.3-rc.1](https://github.com/p-fruck/spond-webcal/compare/v1.0.2...v1.0.3-rc.1) (2026-08-25)
 
 
