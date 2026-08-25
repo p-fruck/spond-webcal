@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
   contents: write
   issues: write
   pull-requests: write
@@ -19,17 +18,11 @@ concurrency:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    environment: default
     steps:
       - name: Run release-please
-        id: release
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         with:
           release-type: go
           package-name: spond-webcal
-
-      - name: Trigger Docker publish for release tag
-        if: ${{ steps.release.outputs.release_created }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ steps.release.outputs.tag_name }}
-        run: gh workflow run docker-publish.yml --ref "$TAG_NAME"
+          token: ${{ secrets.RELEASE_TOKEN }}
