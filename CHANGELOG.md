@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3-rc.1](https://github.com/p-fruck/spond-webcal/compare/v1.0.2...v1.0.3-rc.1) (2026-08-25)
+
+
+### Miscellaneous Chores
+
+* release 1.0.3-rc.1 ([5837a87](https://github.com/p-fruck/spond-webcal/commit/5837a87a71bc58c3995a568aa0ba1d05470968ba))
+
 ## [1.0.2](https://github.com/p-fruck/spond-webcal/compare/v1.0.1...v1.0.2) (2026-08-23)
 
 
