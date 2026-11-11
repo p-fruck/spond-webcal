@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.25-alpine AS builder
+FROM docker.io/library/golang:1.27-alpine AS builder
 
 WORKDIR /src
 
@@ -14,7 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY openapi.yaml ./
-RUN go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0 -package api \
+RUN go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.2 -package api \
             -generate types,client \
             -o internal/api/client.gen.go \
             openapi.yaml
